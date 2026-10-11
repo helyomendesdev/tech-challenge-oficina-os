@@ -1,0 +1,25 @@
+# Dependências fixadas para builds reproduzíveis (OS Service — Fase 4)
+Django>=5.1,<5.2
+djangorestframework>=3.15,<3.16
+djangorestframework-simplejwt>=5.5,<5.6
+drf-spectacular>=0.27,<0.28
+psycopg2-binary>=2.9,<3.0
+
+python-decouple>=3.8,<4.0
+
+# Servidor de aplicação
+gunicorn>=22.0,<23.0
+whitenoise>=6.7,<7.0
+
+# CORS — chamadas de outros serviços e frontends
+django-cors-headers>=4.3,<5.0
+
+# Filtros
+django-filter>=24.0,<25.0
+
+# Observabilidade (Fase 3)
+newrelic>=9.0,<10.0
+
+# Testes
+pytest-django>=4.8,<5.0
+pytest-cov>=5.0,<6.0

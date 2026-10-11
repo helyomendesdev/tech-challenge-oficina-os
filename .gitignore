@@ -1,0 +1,28 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Django
+db.sqlite3
+staticfiles/
+*.log
+
+# Testes / qualidade
+.coverage
+coverage.xml
+report.xml
+htmlcov/
+.pytest_cache/
+reports/
+
+# Ambiente
+.env
+.envrc
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
