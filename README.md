@@ -43,7 +43,7 @@ export DJANGO_SECRET_KEY=... POSTGRES_PASSWORD=...
 python manage.py migrate && python manage.py runserver 8001
 ```
 
-## Equipe — Grupo 80
+## Equipe — Grupo 47
 
 | Papel na Fase 4 | Responsável |
 |---|---|
