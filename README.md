@@ -28,7 +28,11 @@ Escopo do serviço (enunciado Fase 4):
 - `/api/v1/ordens-servico/abrir/`, `/fila/`, `/<id>/status/`, `/orcamentos/notificacoes/` — use cases extraídos
 - `/api/v1/ordens-servico/<os_pk>/servicos/<pk>/iniciar|finalizar/` — itens de serviço
 
-Swagger/OpenAPI via drf-spectacular ( entra com os endpoints reais ).
+Swagger/OpenAPI via drf-spectacular:
+
+- `/api/schema/` — OpenAPI 3.0 (JSON)
+- `/api/schema/swagger-ui/` — Swagger UI
+- `/api/schema/redoc/` — ReDoc
 
 ## Saga orquestrada
 
