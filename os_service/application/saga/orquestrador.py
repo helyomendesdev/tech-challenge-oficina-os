@@ -189,13 +189,17 @@ class SagaOrquestrador:
     def _evento_compensacao(
         self, os_id: int, passo: SagaStep, motivo: str
     ) -> SagaEventDTO:
-        from datetime import datetime, timezone
-
         return SagaEventDTO(
             event_id=f"comp-{os_id}-{passo.value}",
             event_type=COMPENSACOES[passo],
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=self._agora(),
             correlation_id=f"os-{os_id}",
             os_id=os_id,
             payload={"motivo": motivo},
         )
+
+    @staticmethod
+    def _agora():
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc)
