@@ -21,6 +21,7 @@ from os_service.application.saga.ports import (
     SagaPublisherPort,
     SagaStateRepositoryPort,
 )
+from os_service.application.saga.orquestrador import SagaOrquestrador
 
 logger = logging.getLogger("os_service.saga")
 
@@ -80,21 +81,101 @@ class InMemorySagaPublisher(SagaPublisherPort):
 
 
 class DjangoSagaStateRepository(SagaStateRepositoryPort):
-    """Estado da saga no banco do -os (novo app django `os_service` models)."""
+    """Estado da saga no banco do -os (models SagaInstance/ProcessedEvent)."""
 
-    def _criar_dto(self, instance: Any) -> SagaInstanceStateDTO:
+    def _dto(self, instância):  # noqa: N805 — assinatura do Protocol
         return SagaInstanceStateDTO(
-            os_id=instance.os_id,
-            status=SagaStatus(instance.status),
+            os_id=instância.os_id,
+            status=SagaStatus(instância.status),
             passo_atual=(
-                SagaStep(instance.passo_atual) if instance.passo_atual else None
+                SagaStep(instância.passo_atual) if instância.passo_atual else None
             ),
-            passos_concluidos=tuple(SagaStep(p) for p in instance.passos_concluidos),
+            passos_concluidos=tuple(SagaStep(p) for p in instância.passos_concluidos),
             compensation_pendente=(
-                SagaStep(instance.compensation_pendente)
-                if instance.compensation_pendente
+                SagaStep(instância.compensation_pendente)
+                if instância.compensation_pendente
                 else None
             ),
-            iniciado_em=instance.iniciado_em,
-            atualizado_em=instance.atualizado_em,
+            iniciado_em=instância.iniciado_em,
+            atualizado_em=instância.atualizado_em,
         )
+
+    def criar(self, os_id, passo_atual):
+        from os_service.models import SagaInstance
+
+        instancia, _ = SagaInstance.objects.get_or_create(
+            os_id=os_id,
+            defaults={"status": SagaStatus.EM_ANDAMENTO.value, "passo_atual": passo_atual.value},
+        )
+        return self._dto(instancia)
+
+    def get_by_os(self, os_id):
+        from os_service.models import SagaInstance
+
+        instancia = SagaInstance.objects.filter(os_id=os_id).first()
+        return self._dto(instancia) if instancia else None
+
+    def avancar(self, os_id, novo_passo):
+        from os_service.models import SagaInstance
+
+        instancia = SagaInstance.objects.get(os_id=os_id)
+        instancia.avancar(novo_passo.value)
+        instancia.save()
+        return self._dto(instancia)
+
+    def iniciar_compensacao(self, os_id):
+        from os_service.models import SagaInstance
+
+        instancia = SagaInstance.objects.get(os_id=os_id)
+        instancia.status = SagaStatus.COMPENSANDO.value
+        instancia.save()
+        return self._dto(instancia)
+
+    def marcar_compensada(self, os_id):
+        from os_service.models import SagaInstance
+
+        instancia = SagaInstance.objects.get(os_id=os_id)
+        instancia.status = SagaStatus.COMPENSADA.value
+        instancia.passo_atual = None
+        instancia.save()
+        return self._dto(instancia)
+
+    def marcar_concluida(self, os_id):
+        from os_service.models import SagaInstance
+
+        instancia = SagaInstance.objects.get(os_id=os_id)
+        instancia.status = SagaStatus.CONCLUIDA.value
+        instancia.passo_atual = None
+        instancia.save()
+        return self._dto(instancia)
+
+    def marcar_falha(self, os_id, motivo):
+        from os_service.models import SagaInstance
+
+        instancia = SagaInstance.objects.get(os_id=os_id)
+        instancia.status = SagaStatus.FALHA.value
+        instancia.passo_atual = None
+        instancia.falha_motivo = motivo
+        instancia.save()
+        return self._dto(instancia)
+
+
+def build_saga_orquestrador() -> SagaOrquestrador:
+    """Monta orquestrador da saga com estado Django e publisher local/SQS."""
+    from django.conf import settings as dj_settings
+
+    if getattr(dj_settings, "SAGA_QUEUE_URL", None):
+        import boto3
+
+        publisher: SagaPublisherPort = SQSSagaPublisher(
+            queue_url=dj_settings.SAGA_QUEUE_URL,
+            client=boto3.client("sqs"),
+        )
+    else:
+        publisher = InMemorySagaPublisher()
+
+    return SagaOrquestrador(
+        state_repository=DjangoSagaStateRepository(),
+        publisher=publisher,
+    )
+

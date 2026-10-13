@@ -19,6 +19,8 @@ from os_service.application.ports.ordem_servico_repository import (
 from os_service.application.ports.servico_repository import ServicoRepositoryPort
 from os_service.application.ports.transaction_manager import TransactionManagerPort
 from os_service.application.ports.veiculo_repository import VeiculoRepositoryPort
+from os_service.application.saga.dto import SagaEventDTO, SagaEventType, SagaStep
+from os_service.application.saga.orquestrador import SagaOrquestrador
 from os_service.domain.enums import StatusOrdemServico
 
 
@@ -41,6 +43,7 @@ class AbrirOrdemServicoUseCase:
         transaction_manager: TransactionManagerPort,
         notification_port: NotificationPort | None = None,
         observabilidade_port: ObservabilidadePort | None = None,
+        saga_orquestrador: SagaOrquestrador | None = None,
     ):
         self.cliente_repository = cliente_repository
         self.veiculo_repository = veiculo_repository
@@ -49,6 +52,8 @@ class AbrirOrdemServicoUseCase:
         self.transaction_manager = transaction_manager
         self.notification_port = notification_port
         self.observabilidade_port = observabilidade_port
+        # Saga opcional: quando presente, a abertura de OS inicia a saga
+        self.saga_orquestrador = saga_orquestrador
 
     def execute(
         self, input_dto: AbrirOrdemServicoInputDTO
@@ -105,6 +110,7 @@ class AbrirOrdemServicoUseCase:
 
         self._notificar_orcamento(ordem_servico, cliente)
         self._registrar_evento_abertura(ordem_servico)
+        self._publicar_evento_saga(ordem_servico, cliente, input_dto)
 
         return AbrirOrdemServicoOutputDTO(
             ordem_servico_id=_campo(ordem_servico, "id"),
@@ -147,3 +153,42 @@ class AbrirOrdemServicoUseCase:
             'duracaoStatusSegundos': 0.0,
             'erroTipo': None,
         })
+
+    def _publicar_evento_saga(self, ordem_servico, cliente, input_dto) -> None:
+        """Dispara a saga orquestrada: publique OrdemServicoCriada e inicia estado.
+
+        Falha na saga não reverte a abertura: SagaInstance guarda o registro
+        para reprocesso (contrato, DLQ + idempotência).
+        """
+        if not self.saga_orquestrador:
+            return
+
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        from os_service.application.saga.dto import SagaStatus
+
+        os_id = _campo(ordem_servico, "id")
+        evento = SagaEventDTO(
+            event_id=str(uuid4()),
+            event_type=SagaEventType.ORDEM_SERVICO_CRIADA,
+            occurred_at=datetime.now(timezone.utc),
+            correlation_id=f"os-{os_id}",
+            os_id=os_id,
+            payload={
+                "os_id": os_id,
+                "cliente_id": _campo(cliente, "id"),
+                "veiculo_id": _campo(ordem_servico, "veiculo_id"),
+                "servico_ids": list(input_dto.servicos or []),
+                "valor_estimado": str(_campo(ordem_servico, "valor_total")),
+                "status": _campo(ordem_servico, "status"),
+            },
+        )
+        try:
+            estado = self.saga_orquestrador.iniciar(evento)
+            assert estado.status == SagaStatus.EM_ANDAMENTO
+        except Exception:  # pragma: no cover - falha de saga não bloqueia abertura
+            import logging
+
+            logging.getLogger("os_service.saga").exception(
+                "saga_inicio_falhou", extra={"os_id": os_id}
+            )
