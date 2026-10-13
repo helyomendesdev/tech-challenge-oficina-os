@@ -90,8 +90,26 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'EXCEPTION_HANDLER': 'os_service.domain.api_exceptions.custom_exception_handler',
+    # Paginação global — evita retornar listas ilimitadas
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    # Filtros — habilita ?status=RECEBIDA, ?data_abertura_after=2026-01-01, etc.
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ],
+    # Throttling global
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '60/hour',          # Usuários não autenticados
+        'user': '600/hour',         # Usuários autenticados
+        'consulta_cliente': '30/hour',  # Endpoint público de consulta
+    },
 }
 
 # ---------------------------------------------------------------------------
