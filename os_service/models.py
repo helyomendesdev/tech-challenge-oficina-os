@@ -488,3 +488,78 @@ def audit_log_item_peca_delete(sender, instance, **kwargs):
             "user_id": instance.created_by_id,
         }
     )
+"""Estado da Saga — persistência do orquestrador no banco do -os.
+
+Uma linha por OS em fluxo (SagaInstance). Passos concluídos são lista JSON.
+Conforme contrato v1: este estado pertence ao -os; outros serviços mantêm
+seus próprios registros de processamento.
+"""
+import json
+
+from django.db import models
+
+from os_service.application.saga.dto import SagaStatus, SagaStep
+
+
+class SagaInstance(models.Model):
+    """Instância da saga para uma OS."""
+
+    os_id = models.PositiveIntegerField(unique=True, db_index=True)
+    status = models.CharField(
+        max_length=20,
+        choices=[(s.value, s.value) for s in SagaStatus],
+        default=SagaStatus.EM_ANDAMENTO.value,
+    )
+    passo_atual = models.CharField(
+        max_length=20,
+        choices=[(s.value, s.value) for s in SagaStep],
+        null=True,
+        blank=True,
+    )
+    passos_concluidos = models.JSONField(default=list)
+    compensation_pendente = models.CharField(
+        max_length=20,
+        choices=[(s.value, s.value) for s in SagaStep],
+        null=True,
+        blank=True,
+    )
+    event_ids_processados = models.JSONField(default=list)
+    iniciado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    falha_motivo = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = "saga_instancia"
+
+    def __str__(self):
+        return f"Saga OS {self.os_id} — {self.status} ({self.passo_atual})"
+
+    # ------------------------------------------------------------------
+    # Deduplicação de event_id (contrato, seção 6)
+    # ------------------------------------------------------------------
+    def marcar_evento_processado(self, event_id: str) -> bool:
+        """Marca event_id como processado. False = duplicado (skip)."""
+        if event_id in self.event_ids_processados:
+            return False
+        self.event_ids_processados = list(self.event_ids_processados) + [event_id]
+        return True
+
+    def avancar(self, novo_passo: str) -> None:
+        passos = set(self.passos_concluidos or [])
+        if self.passo_atual:
+            passos.add(self.passo_atual)
+        self.passos_concluidos = sorted(passos)
+        self.passo_atual = novo_passo
+
+
+class ProcessedEvent(models.Model):
+    """Índice de dedupe global por event_id (idempotência do consumidor)."""
+
+    event_id = models.UUIDField(unique=True, db_index=True)
+    event_type = models.CharField(max_length=64)
+    os_id = models.PositiveIntegerField(null=True, blank=True, db_index=True)
+    processed_at = models.DateTimeField(auto_now_add=True)
+    body = models.JSONField(default=dict, null=True, blank=True)
+
+    class Meta:
+        db_table = "saga_evento_processado"
