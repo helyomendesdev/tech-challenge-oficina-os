@@ -113,6 +113,22 @@ REST_FRAMEWORK = {
 }
 
 # ---------------------------------------------------------------------------
+# Swagger / OpenAPI (drf-spectacular)
+# ---------------------------------------------------------------------------
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'OS Service — Oficina Mecânica (Grupo 47)',
+    'DESCRIPTION': 'Microsserviço de Ordens de Serviço e orquestrador da '
+                   'Saga orquestrada. Parte da Fase 4 — Tech Challenge.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'ENUM_NAME_OVERRIDES': {
+        'StatusOrdemServicoEnum': 'os_service.models.OrdemServico.STATUS_CHOICES',
+        'StatusItemServicoEnum': 'os_service.models.ItemServicoOS.STATUS_CHOICES',
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Internacionalização
 # ---------------------------------------------------------------------------
 LANGUAGE_CODE = 'pt-br'
