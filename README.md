@@ -24,9 +24,17 @@ Escopo do serviço (enunciado Fase 4):
 
 - `GET /health/live/` — liveness
 - `GET /health/ready/` — readiness (valida banco)
-- `GET|POST /api/v1/ordens-servico/` — stub inicial (extração em curso)
+- `GET|POST /api/v1/ordens-servico/` — listagem/criação (extração concluída: PR #2)
+- `/api/v1/ordens-servico/abrir/`, `/fila/`, `/<id>/status/`, `/orcamentos/notificacoes/` — use cases extraídos
+- `/api/v1/ordens-servico/<os_pk>/servicos/<pk>/iniciar|finalizar/` — itens de serviço
 
 Swagger/OpenAPI via drf-spectacular ( entra com os endpoints reais ).
+
+## Saga orquestrada
+
+- Orquestrador no -os: `os_service/application/saga/` (máquina de estado + compensações)
+- Contrato de eventos: `CONTRATO_SAGA_V1.md` no repo `-saga` (rascunho em PR)
+- Transporte: SQS (aguardando decisão de mensageria da Sophia; adapters prontos)
 
 ## CI/CD
 
