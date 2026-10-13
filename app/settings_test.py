@@ -16,3 +16,6 @@ ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver']
 PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.MD5PasswordHasher',
 ]
+
+# Observabilidade (extraído do monólito) — exigido pelo adapter real
+SERVICE_ENVIRONMENT = 'dev'

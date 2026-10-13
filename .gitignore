@@ -1,28 +1,12 @@
-# python
 __pycache__/
-*.py[cod]
-*.egg-info/
+*.pyc
 .venv/
-venv/
-
-# Django
-db.sqlite3
+.env
+.envrc
 staticfiles/
 *.log
-
-# Testes / qualidade
-.coverage
+.pytest_cache/
 coverage.xml
 report.xml
 htmlcov/
-.pytest_cache/
-reports/
-
-# Ambiente
-.env
-.envrc
-
-# IDE
-.idea/
-.vscode/
 .DS_Store
