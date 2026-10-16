@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from os_service.application.saga import dto
 from os_service.application.saga.dto import (
     SagaEventDTO,
     SagaInstanceStateDTO,
@@ -180,6 +181,123 @@ def build_saga_orquestrador() -> SagaOrquestrador:
 
     return SagaOrquestrador(
         state_repository=DjangoSagaStateRepository(),
+        publisher=publisher,
+    )
+
+
+# ----------------------------------------------------------------------
+# Contrato v1 (-saga PR #2)
+# ----------------------------------------------------------------------
+class DjangoSagaStateRepositoryV1:
+    """Estado da saga v1 no banco do -os (SagaInstance.saga_id)."""
+
+    def criar(self, saga_id: str, os_id: int, estado_inicial) -> dto.SagaV1StateDTO:
+        from os_service.models import SagaInstance
+
+        instancia, _ = SagaInstance.objects.get_or_create(
+            saga_id=saga_id,
+            defaults={
+                "os_id": os_id,
+                "estado": estado_inicial.value,
+                "status": dto.StatusSaga.EM_ANDAMENTO.value,
+            },
+        )
+        return self._dto(instancia)
+
+    def get(self, saga_id: str) -> dto.SagaV1StateDTO | None:
+        from os_service.models import SagaInstance
+
+        instancia = SagaInstance.objects.filter(saga_id=saga_id).first()
+        return self._dto(instancia) if instancia else None
+
+    def salvar_estado(self, saga_id: str, novo_estado) -> dto.SagaV1StateDTO:
+        from os_service.models import SagaInstance
+
+        instancia = SagaInstance.objects.get(saga_id=saga_id)
+        instancia.estado = novo_estado.value
+        if novo_estado is dto.EstadoSaga.CONCLUIDA:
+            instancia.status = dto.StatusSaga.CONCLUIDA.value
+        elif novo_estado is dto.EstadoSaga.CANCELADA:
+            instancia.status = dto.StatusSaga.FALHA.value
+        instancia.save()
+        return self._dto(instancia)
+
+    def salvar_motivo(self, saga_id: str, motivo: str) -> None:
+        from os_service.models import SagaInstance
+
+        SagaInstance.objects.filter(saga_id=saga_id).update(motivo=motivo)
+
+    def _dto(self, instancia) -> dto.SagaV1StateDTO:
+        return dto.SagaV1StateDTO(
+            saga_id=str(instancia.saga_id),
+            os_id=instancia.os_id,
+            status=dto.StatusSaga(instancia.status),
+            estado=dto.EstadoSaga(instancia.estado),
+            motivo=instancia.motivo,
+        )
+
+
+class SQSSagaPublisherV1:
+    """Publisher SQS do envelope do contrato v1 (fila FIFO)."""
+
+    def __init__(self, queue_url: str, client):
+        self.queue_url = queue_url
+        self.client = client
+
+    def publish(self, msg: dto.MensagemSaga) -> dict:
+        from django.conf import settings as dj_settings
+
+        from os_service.infrastructure.saga_adapters import os_id_group
+
+        if not self.queue_url:
+            raise RuntimeError("SAGA_QUEUE_URL não configurada")
+        response = self.client.send_message(
+            QueueUrl=self.queue_url,
+            MessageBody=json.dumps(dto.envelope(msg), ensure_ascii=False),
+            MessageGroupId=os_id_group(msg.os_id),
+            MessageDeduplicationId=msg.message_id,
+        )
+        logger.info(
+            "saga_v1_comando_publicado",
+            extra={
+                "message_id": msg.message_id,
+                "type": msg.type,
+                "saga_id": msg.saga_id,
+                "os_id": msg.os_id,
+            },
+        )
+        return response
+
+
+class InMemorySagaPublisherV1:
+    """Publisher de teste/local do contrato v1."""
+
+    def __init__(self):
+        self.publicados: list[dto.MensagemSaga] = []
+
+    def publish(self, msg: dto.MensagemSaga) -> dict:
+        self.publicados.append(msg)
+        return {"MessageId": msg.message_id}
+
+
+def build_saga_orquestrador_v1() -> "SagaOrquestradorV1":
+    """Monta o orquestrador v1 (máquina do contrato) com estado Django."""
+    from django.conf import settings as dj_settings
+
+    from os_service.application.saga.orquestrador_v1 import SagaOrquestradorV1
+
+    if getattr(dj_settings, "SAGA_QUEUE_URL", None):
+        import boto3
+
+        publisher = SQSSagaPublisherV1(
+            queue_url=dj_settings.SAGA_QUEUE_URL,
+            client=boto3.client("sqs"),
+        )
+    else:
+        publisher = InMemorySagaPublisherV1()
+
+    return SagaOrquestradorV1(
+        state_repository=DjangoSagaStateRepositoryV1(),
         publisher=publisher,
     )
 

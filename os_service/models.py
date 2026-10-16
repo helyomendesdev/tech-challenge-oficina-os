@@ -495,6 +495,7 @@ Conforme contrato v1: este estado pertence ao -os; outros serviços mantêm
 seus próprios registros de processamento.
 """
 import json
+import uuid
 
 from django.db import models
 
@@ -502,9 +503,18 @@ from os_service.application.saga.dto import SagaStatus, SagaStep
 
 
 class SagaInstance(models.Model):
-    """Instância da saga para uma OS."""
+    """Instância da saga (contrato v1).
 
-    os_id = models.PositiveIntegerField(unique=True, db_index=True)
+    saga_id é a chave (UUID, gerada pelo orquestrador): uma OS pode ter
+    várias sagas ao longo da vida (ex.: recusar orçamento e reabrir).
+    `estado` é o estado da máquina saga-estados.yaml (contrato v1);
+    passo_atual/passos_concluidos são do rascunho e caem com a migração
+    do realinhamento.
+    """
+
+    saga_id = models.UUIDField(unique=True, db_index=True, default=uuid.uuid4)
+    os_id = models.PositiveIntegerField(db_index=True)
+    estado = models.CharField(max_length=32, default="INICIADA")
     status = models.CharField(
         max_length=20,
         choices=[(s.value, s.value) for s in SagaStatus],
@@ -523,6 +533,7 @@ class SagaInstance(models.Model):
         null=True,
         blank=True,
     )
+    motivo = models.TextField(null=True, blank=True)
     event_ids_processados = models.JSONField(default=list)
     iniciado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
@@ -530,6 +541,7 @@ class SagaInstance(models.Model):
 
     class Meta:
         db_table = "saga_instancia"
+        indexes = [models.Index(fields=["os_id", "status"])]
 
     def __str__(self):
         return f"Saga OS {self.os_id} — {self.status} ({self.passo_atual})"
