@@ -155,40 +155,44 @@ class AbrirOrdemServicoUseCase:
         })
 
     def _publicar_evento_saga(self, ordem_servico, cliente, input_dto) -> None:
-        """Dispara a saga orquestrada: publique OrdemServicoCriada e inicia estado.
+        """Dispara a saga (contrato v1): gatilho externo `inicio`.
 
+        O orquestrador v1 gera o sagaId, cria o estado INICIADA →
+        ORCAMENTO_SOLICITADO e publica o comando GerarOrcamento.
         Falha na saga não reverte a abertura: SagaInstance guarda o registro
         para reprocesso (contrato, DLQ + idempotência).
         """
         if not self.saga_orquestrador:
             return
 
-        from datetime import datetime, timezone
+        import logging
         from uuid import uuid4
-        from os_service.application.saga.dto import SagaStatus
 
         os_id = _campo(ordem_servico, "id")
-        evento = SagaEventDTO(
-            event_id=str(uuid4()),
-            event_type=SagaEventType.ORDEM_SERVICO_CRIADA,
-            occurred_at=datetime.now(timezone.utc),
-            correlation_id=f"os-{os_id}",
-            os_id=os_id,
-            payload={
-                "os_id": os_id,
-                "cliente_id": _campo(cliente, "id"),
-                "veiculo_id": _campo(ordem_servico, "veiculo_id"),
-                "servico_ids": list(input_dto.servicos or []),
-                "valor_estimado": str(_campo(ordem_servico, "valor_total")),
-                "status": _campo(ordem_servico, "status"),
-            },
-        )
+        payload = {
+            "clienteId": _campo(cliente, "id"),
+            "veiculoId": _campo(ordem_servico, "veiculo_id"),
+            "servicos": [
+                {"servicoId": s, "quantidade": 1}
+                for s in (input_dto.servicos or [])
+            ],
+            "pecas": [
+                p
+                if isinstance(p, dict)
+                else {
+                    "pecaId": getattr(p, "peca_id", None) or p[0],
+                    "quantidade": getattr(p, "quantidade", None) or p[1],
+                }
+                for p in (input_dto.pecas or [])
+            ],
+        }
         try:
-            estado = self.saga_orquestrador.iniciar(evento)
-            assert estado.status == SagaStatus.EM_ANDAMENTO
+            self.saga_orquestrador.iniciar(
+                os_id=os_id,
+                request_id=f"abertura-os-{os_id}-{uuid4().hex[:8]}",
+                payload=payload,
+            )
         except Exception:  # pragma: no cover - falha de saga não bloqueia abertura
-            import logging
-
             logging.getLogger("os_service.saga").exception(
                 "saga_inicio_falhou", extra={"os_id": os_id}
             )

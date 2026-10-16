@@ -1,41 +1,26 @@
-"""Testes de integração da Saga com os use cases (usar settings_test).
+"""Testes de integração da Saga com o use case de abertura (contrato v1).
 
-Cobre: abertura de OS inicia saga com event OrdemServicoCriada; estado
-SagaInstance criado no banco do -os; publisher recebe o envelhe.
+Abertura de OS = gatilho externo `inicio`: cria SagaInstance (saga_id novo)
+e publica o comando GerarOrcamento no publisher.
 """
 from unittest.mock import MagicMock
 
 from django.test import TestCase
 
-from os_service.application.saga.dto import (
-    SagaEventType,
-    SagaInstanceStateDTO,
-    SagaStatus,
-    SagaStep,
-)
+from os_service.application.saga import dto
 
 
-class SagaRegistroIntegracaoTestCase(TestCase):
-    """Publicação de OrdemServicoCriada na abertura de OS."""
+class SagaAberturaV1TestCase(TestCase):
+    """Abertura de OS dispara a saga v1 (GerarOrcamento)."""
 
     def preparar(self):
         from os_service.application.use_cases.abrir_ordem_servico import (
             AbrirOrdemServicoUseCase,
         )
-        from os_service.application.saga.orquestrador import SagaOrquestrador
-        from unittest.mock import MagicMock
 
-        self.state = MagicMock()
-        self.publisher = MagicMock()
-        self.publisher.publish.return_value = {"MessageId": "x"}
-        orquestrador = SagaOrquestrador(self.state, self.publisher)
+        orquestrador = MagicMock()
+        orquestrador.iniciar.return_value = "saga-uuid-1"
 
-        # Use case real: repos fake mínimo
-        self.state.criar.return_value = SagaInstanceStateDTO(
-            os_id=1,
-            status=SagaStatus.EM_ANDAMENTO,
-            passo_atual=SagaStep.RESERVA_ESTOQUE,
-        )
         use_case = AbrirOrdemServicoUseCase(
             cliente_repository=MagicMock(),
             veiculo_repository=MagicMock(),
@@ -44,37 +29,56 @@ class SagaRegistroIntegracaoTestCase(TestCase):
             transaction_manager=MagicMock(),
             saga_orquestrador=orquestrador,
         )
-        return use_case
+        return use_case, orquestrador
 
-    def test_abertura_publica_evento_saga(self):
-        use_case = self.preparar()
-        # mocks mínimos pro happy path do use case
-        cliente = {"id": 10, "email": "c@x.com"}
-        ordem = {"id": 1, "veiculo_id": 2, "valor_total": 100.0, "status": "RECEBIDA"}
-        # chamar direto pelo método privado com input fake
+    def test_abertura_inicia_saga_v1_com_payload_do_diagnostico(self):
+        use_case, orquestrador = self.preparar()
+
         class FakeInput:
             servicos = [1, 2]
-            pecas = []
+            pecas = [(40, 2)]
 
-        use_case._publicar_evento_saga(ordem, cliente, FakeInput())
+        use_case._publicar_evento_saga(
+            {"id": 1, "veiculo_id": 15, "valor_total": 250.0, "status": "RECEBIDA"},
+            {"id": 7, "email": "c@x.com"},
+            FakeInput(),
+        )
 
-        # Saga iniciada = estado criado; publicação do comando concentra-se
-        # nos avanços de passo (EXECUCAO_INICIADA etc.), não no início.
-        self.state.criar.assert_called_once()
-        args, kwargs = self.state.criar.call_args
-        self.assertEqual(args[1], SagaStep.RESERVA_ESTOQUE)
+        orquestrador.iniciar.assert_called_once()
+        _, kwargs = orquestrador.iniciar.call_args
+        self.assertEqual(kwargs["os_id"], 1)
+        payload = kwargs["payload"]
+        self.assertEqual(payload["clienteId"], 7)
+        self.assertEqual(payload["veiculoId"], 15)
+        self.assertEqual(
+            payload["servicos"],
+            [{"servicoId": 1, "quantidade": 1}, {"servicoId": 2, "quantidade": 1}],
+        )
+        self.assertEqual(payload["pecas"], [{"pecaId": 40, "quantidade": 2}])
+        self.assertTrue(kwargs["request_id"])
 
-    def test_abertura_cria_estado_saga(self):
-        use_case = self.preparar()
+    def test_falha_da_saga_nao_bloqueia_abertura(self):
+        use_case, orquestrador = self.preparar()
+        orquestrador.iniciar.side_effect = RuntimeError("fila fora do ar")
+
         class FakeInput:
             servicos = []
             pecas = []
 
+        # não levanta
         use_case._publicar_evento_saga(
             {"id": 7, "veiculo_id": 1, "valor_total": 0, "status": "RECEBIDA"},
             {"id": 1, "email": "c@x.com"},
             FakeInput(),
         )
-        self.state.criar.assert_called_once()
-        args, kwargs = self.state.criar.call_args
-        self.assertEqual(args[1], SagaStep.RESERVA_ESTOQUE)
+
+    def test_build_factory_usa_orquestrador_v1(self):
+        from os_service.application.saga.orquestrador_v1 import (
+            SagaOrquestradorV1,
+        )
+        from os_service.infrastructure.saga_adapters import (
+            build_saga_orquestrador_v1,
+        )
+
+        orquestrador = build_saga_orquestrador_v1()
+        self.assertIsInstance(orquestrador, SagaOrquestradorV1)
