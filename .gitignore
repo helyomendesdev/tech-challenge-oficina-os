@@ -10,3 +10,6 @@ coverage.xml
 report.xml
 htmlcov/
 .DS_Store
+
+.coverage
+*.sqlite3
