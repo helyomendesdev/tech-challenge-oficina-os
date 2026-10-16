@@ -21,6 +21,7 @@ from os_service.application.saga.ports import (
     SagaPublisherPort,
     SagaStateRepositoryPort,
 )
+from uuid import uuid4
 
 # Sequência do fluxo de felicidade
 SEQUENCIA: tuple[SagaStep, ...] = (
@@ -164,12 +165,16 @@ class SagaOrquestrador:
         """Publica o comando que inicia o próximo passo.
 
         EXECUCAO → execucao inicia por ExecucaoIniciada (comando direto).
-        Demais passos esperam gatilho do próprio serviço responsable.
+        Demais passos esperam gatilho do próprio servicio responsable.
+
+        Cada mensagem publicada tem event_id próprio: reusar o event_id do
+        evento recebido faz o consumidor descartar o comando como duplicado
+        (idempotência do contrato, seção 6).
         """
         if proximo == SagaStep.EXECUCAO:
             self.publisher.publish(
                 SagaEventDTO(
-                    event_id=event.event_id,
+                    event_id=str(uuid4()),
                     event_type=SagaEventType.EXECUCAO_INICIADA,
                     occurred_at=event.occurred_at,
                     correlation_id=event.correlation_id,
@@ -190,7 +195,7 @@ class SagaOrquestrador:
         self, os_id: int, passo: SagaStep, motivo: str
     ) -> SagaEventDTO:
         return SagaEventDTO(
-            event_id=f"comp-{os_id}-{passo.value}",
+            event_id=str(uuid4()),
             event_type=COMPENSACOES[passo],
             occurred_at=self._agora(),
             correlation_id=f"os-{os_id}",
