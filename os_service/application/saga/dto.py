@@ -77,6 +77,29 @@ class TransicaoInvalidaError(Exception):
     """
 
 
+class SagaNaoEncontradaError(Exception):
+    """sagaId inexistente no repositório de estado."""
+
+
+class StatusSaga(str, Enum):
+    """Status de alto nível da instância da saga (espelha SagaInstance)."""
+
+    EM_ANDAMENTO = "EM_ANDAMENTO"
+    CONCLUIDA = "CONCLUIDA"
+    FALHA = "FALHA"
+
+
+@dataclass(frozen=True)
+class SagaV1StateDTO:
+    """Estado corrente de uma instância da saga v1."""
+
+    saga_id: str
+    os_id: int
+    status: StatusSaga
+    estado: EstadoSaga
+    motivo: str | None = None
+
+
 @dataclass(frozen=True)
 class MensagemSaga:
     """Envelope padrão de mensagem do contrato v1."""
