@@ -51,6 +51,10 @@ class SQSSagaPublisher(SagaPublisherPort):
             QueueUrl=self.queue_url,
             MessageBody=json.dumps(self._envelope(event), ensure_ascii=False),
             MessageGroupId=os_id_group(event.os_id),
+            # Fila FIFO: sem isso o send é recusado (ou dedupado por body
+            # se ContentBasedDeduplication estiver ligado). O id de dedupe
+            # é o messageId do envelope.
+            MessageDeduplicationId=event.event_id,
         )
         logger.info(
             "saga_evento_publicado",
