@@ -249,11 +249,18 @@ class SQSSagaPublisherV1:
 
         from os_service.infrastructure.saga_adapters import os_id_group
 
+        from oficina_saga import newrelic_adapter
+
         if not self.queue_url:
             raise RuntimeError("SAGA_QUEUE_URL não configurada")
+        envelope = dto.envelope(msg)
+        # traceparent/tracestate vão em MessageAttributes (tracing/propagacao-sqs.md
+        # do -saga); com o agente ativo, o trace da requisição continua na fila.
+        newrelic_adapter.registrar_mensagem(envelope)
         response = self.client.send_message(
             QueueUrl=self.queue_url,
-            MessageBody=json.dumps(dto.envelope(msg), ensure_ascii=False),
+            MessageBody=json.dumps(envelope, ensure_ascii=False),
+            MessageAttributes=newrelic_adapter.atributos_para_envio(),
             MessageGroupId=os_id_group(msg.os_id),
             MessageDeduplicationId=msg.message_id,
         )
