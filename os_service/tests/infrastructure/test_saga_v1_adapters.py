@@ -9,9 +9,12 @@
 """
 import json
 import uuid
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 from django.db import transaction as db_transaction
 from django.test import TestCase
+from oficina_saga import rastreio
 
 from os_service.application.saga import dto
 from os_service.infrastructure.saga_adapters import (
@@ -113,10 +116,6 @@ class SQSSagaPublisherV1TestCase(TestCase):
 
     def test_publish_leva_traceparent_w3c_nos_message_attributes(self):
         """Trace atravessa a fila: traceparent vai em MessageAttributes (contrato v1)."""
-        from unittest.mock import MagicMock
-
-        from oficina_saga import rastreio
-
         client = MagicMock()
         client.send_message.return_value = {"MessageId": "m-2"}
         publisher = SQSSagaPublisherV1(
@@ -129,9 +128,7 @@ class SQSSagaPublisherV1TestCase(TestCase):
             saga_id=str(uuid.uuid4()),
             os_id=102,
             request_id="req-2",
-            occurred_at=__import__("datetime").datetime.now(
-                __import__("datetime").timezone.utc
-            ),
+            occurred_at=datetime.now(timezone.utc),
             causation_id=None,
             payload={"clienteId": 7},
         )
