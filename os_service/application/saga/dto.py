@@ -98,6 +98,9 @@ class SagaV1StateDTO:
     status: StatusSaga
     estado: EstadoSaga
     motivo: str | None = None
+    # requestId da abertura e ids dos passos (orcamentoId, pagamentoId,
+    # execucaoId): a compensação precisa deles e o gatilho externo não os traz.
+    referencias: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

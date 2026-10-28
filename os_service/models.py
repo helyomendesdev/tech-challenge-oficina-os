@@ -515,6 +515,10 @@ class SagaInstance(models.Model):
     saga_id = models.UUIDField(unique=True, db_index=True, default=uuid.uuid4)
     os_id = models.PositiveIntegerField(db_index=True)
     estado = models.CharField(max_length=32, default="INICIADA")
+    # Quando entrou no estado atual: o timeout de aprovação conta daqui.
+    estado_desde = models.DateTimeField(null=True, blank=True, db_index=True)
+    # requestId da abertura e ids dos passos, para a compensação.
+    referencias = models.JSONField(default=dict)
     status = models.CharField(
         max_length=20,
         choices=[(s.value, s.value) for s in SagaStatus],

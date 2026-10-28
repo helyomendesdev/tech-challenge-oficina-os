@@ -6,6 +6,8 @@ Comportamentos da máquina de estados aplicados pelo SagaOrquestrador:
   sai com causationId = messageId da resposta; compensação herda motivo;
 - mensagem fora de estado: registra e descarta (semântica do contrato);
 - cancelar: gatilho externo `cancelamento` (só em EM_EXECUCAO).
+- expirar: gatilho externo `timeout` (ADR-003 do -saga, só em AGUARDANDO_APROVACAO).
+- comandos de compensação levam o id do passo desfeito, guardado na saga.
 """
 import unittest
 from datetime import datetime, timezone
@@ -29,6 +31,8 @@ class FakeStateRepository:
             "status": dto.StatusSaga.EM_ANDAMENTO,
             "estado": estado_inicial,
             "motivo": None,
+            "referencias": {},
+            "estado_desde": datetime.now(timezone.utc),
         }
         return self._dto(saga_id)
 
@@ -39,6 +43,7 @@ class FakeStateRepository:
 
     def salvar_estado(self, saga_id, novo_estado):
         self.dados[saga_id]["estado"] = novo_estado
+        self.dados[saga_id]["estado_desde"] = datetime.now(timezone.utc)
         if novo_estado in (dto.EstadoSaga.CONCLUIDA, dto.EstadoSaga.CANCELADA):
             self.dados[saga_id]["status"] = (
                 dto.StatusSaga.CONCLUIDA
@@ -50,6 +55,16 @@ class FakeStateRepository:
     def salvar_motivo(self, saga_id, motivo):
         self.dados[saga_id]["motivo"] = motivo
 
+    def salvar_referencias(self, saga_id, referencias):
+        self.dados[saga_id]["referencias"].update(referencias)
+
+    def listar_aguardando_aprovacao_antes_de(self, limite):
+        return [
+            d["saga_id"] for d in self.dados.values()
+            if d["estado"] is dto.EstadoSaga.AGUARDANDO_APROVACAO
+            and d["estado_desde"] < limite
+        ]
+
     def _dto(self, saga_id):
         d = self.dados[saga_id]
         return dto.SagaV1StateDTO(
@@ -58,6 +73,7 @@ class FakeStateRepository:
             status=d["status"],
             estado=d["estado"],
             motivo=d["motivo"],
+            referencias=dict(d["referencias"]),
         )
 
 
@@ -236,6 +252,71 @@ class SagaOrquestradorV1TestCase(unittest.TestCase):
         self.assertEqual(comando.type, "CancelarExecucao")
         self.assertEqual(comando.payload["motivo"], "CANCELADO_PELO_CLIENTE")
         self.assertIsNone(comando.causation_id)  # gatilho externo
+
+    # ------------------------------------------------------------------
+    # timeout de aprovação (ADR-003) e ids dos passos desfeitos
+    # ------------------------------------------------------------------
+    def test_timeout_cancela_orcamento_com_o_id_guardado(self):
+        orcamento_id = str(uuid4())
+        self._responder("OrcamentoGerado", {"orcamentoId": orcamento_id, "valorTotalCentavos": 10000, "validoAte": "2026-10-20T12:00:00Z"})
+
+        r = self.saga.expirar(self.saga_id)
+
+        self.assertEqual(r.estado, dto.EstadoSaga.COMPENSANDO)
+        comando = self.publisher.publicados[-1]
+        self.assertEqual(comando.type, "CancelarOrcamento")
+        self.assertEqual(comando.payload, {"orcamentoId": orcamento_id, "motivo": "TIMEOUT"})
+        self.assertIsNone(comando.causation_id)  # gatilho externo
+        self.assertEqual(comando.request_id, "req-abc")  # requestId da saga
+
+        r2 = self._responder("OrcamentoCancelado", {"orcamentoId": orcamento_id, "canceladoEm": "2026-10-16T13:40:00Z"})
+        self.assertEqual(r2.estado, dto.EstadoSaga.CANCELADA)
+
+    def test_timeout_fora_de_aguardando_aprovacao_descarta(self):
+        n_antes = len(self.publisher.publicados)
+        r = self.saga.expirar(self.saga_id)
+        self.assertEqual(r.estado, dto.EstadoSaga.ORCAMENTO_SOLICITADO)
+        self.assertEqual(len(self.publisher.publicados), n_antes)
+
+    def test_expirar_vencidas_so_pega_aguardando_alem_do_limite(self):
+        outra = self.saga.iniciar(os_id=102, request_id="req-y", payload={})
+        self._responder("OrcamentoGerado", {"orcamentoId": str(uuid4()), "valorTotalCentavos": 10000, "validoAte": "2026-10-20T12:00:00Z"})
+
+        self.assertEqual(self.saga.expirar_vencidas(datetime(2000, 1, 1, tzinfo=timezone.utc)), [])
+        expiradas = self.saga.expirar_vencidas(datetime(2999, 1, 1, tzinfo=timezone.utc))
+
+        self.assertEqual(expiradas, [self.saga_id])  # a outra segue em ORCAMENTO_SOLICITADO
+        self.assertEqual(self.state.get(outra).estado, dto.EstadoSaga.ORCAMENTO_SOLICITADO)
+
+    def test_cancelamento_leva_execucao_id_da_execucao_iniciada(self):
+        execucao_id = str(uuid4())
+        self._responder("OrcamentoGerado", {"orcamentoId": str(uuid4()), "valorTotalCentavos": 10000, "validoAte": "2026-10-20T12:00:00Z"})
+        self._responder("OrcamentoAprovado", {"orcamentoId": str(uuid4()), "aprovadoEm": "2026-10-16T13:00:00Z"})
+        self._responder("PagamentoConfirmado", {"pagamentoId": str(uuid4()), "valorPagoCentavos": 10000, "mercadoPagoPaymentId": "mp-1", "confirmadoEm": "2026-10-16T13:05:00Z"})
+        self._responder("ExecucaoIniciada", {"execucaoId": execucao_id, "orcamentoId": str(uuid4()), "iniciadaEm": "2026-10-16T13:06:00Z"})
+
+        self.saga.cancelar(self.saga_id, request_id="req-cancel")
+
+        comando = self.publisher.publicados[-1]
+        self.assertEqual(comando.payload, {"execucaoId": execucao_id, "motivo": "CANCELADO_PELO_CLIENTE"})
+
+    def test_estorno_depois_da_execucao_cancelada_leva_pagamento_id(self):
+        pagamento_id = str(uuid4())
+        orcamento_id = str(uuid4())
+        self._responder("OrcamentoGerado", {"orcamentoId": orcamento_id, "valorTotalCentavos": 10000, "validoAte": "2026-10-20T12:00:00Z"})
+        self._responder("OrcamentoAprovado", {"orcamentoId": orcamento_id, "aprovadoEm": "2026-10-16T13:00:00Z"})
+        self._responder("PagamentoConfirmado", {"pagamentoId": pagamento_id, "valorPagoCentavos": 10000, "mercadoPagoPaymentId": "mp-1", "confirmadoEm": "2026-10-16T13:05:00Z"})
+        execucao_id = str(uuid4())
+        self._responder("ExecucaoIniciada", {"execucaoId": execucao_id, "orcamentoId": orcamento_id, "iniciadaEm": "2026-10-16T13:06:00Z"})
+        self._responder("ExecucaoFalhou", {"orcamentoId": orcamento_id, "execucaoId": execucao_id, "erro": {"codigo": "PECAS_FALTANDO", "mensagem": "x"}})
+        self._responder("ExecucaoCancelada", {"execucaoId": execucao_id, "canceladaEm": "2026-10-16T13:20:00Z"})
+
+        estorno = self.publisher.publicados[-1]
+        self.assertEqual(estorno.payload, {"pagamentoId": pagamento_id, "motivo": "EXECUCAO_FALHOU"})
+
+        self._responder("PagamentoEstornado", {"pagamentoId": pagamento_id, "estornadoEm": "2026-10-16T13:25:00Z"})
+        cancelou = self.publisher.publicados[-1]
+        self.assertEqual(cancelou.payload, {"orcamentoId": orcamento_id, "motivo": "EXECUCAO_FALHOU"})
 
     def test_saga_inexistente_rejeita(self):
         with self.assertRaises(dto.SagaNaoEncontradaError):
