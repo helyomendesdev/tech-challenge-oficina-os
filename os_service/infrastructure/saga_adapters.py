@@ -247,8 +247,6 @@ class SQSSagaPublisherV1:
     def publish(self, msg: dto.MensagemSaga) -> dict:
         from django.conf import settings as dj_settings
 
-        from os_service.infrastructure.saga_adapters import os_id_group
-
         from oficina_saga import newrelic_adapter
 
         if not self.queue_url:
@@ -261,7 +259,8 @@ class SQSSagaPublisherV1:
             QueueUrl=self.queue_url,
             MessageBody=json.dumps(envelope, ensure_ascii=False),
             MessageAttributes=newrelic_adapter.atributos_para_envio(),
-            MessageGroupId=os_id_group(msg.os_id),
+            # Contrato v1 (asyncapi.yaml, ADR-001): ordem por Saga, não por OS.
+            MessageGroupId=msg.saga_id,
             MessageDeduplicationId=msg.message_id,
         )
         logger.info(

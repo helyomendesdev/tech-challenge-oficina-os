@@ -103,7 +103,7 @@ class SQSSagaPublisherV1TestCase(TestCase):
         publisher.publish(msg)
 
         _, kwargs = client.send_message.call_args
-        self.assertEqual(kwargs["MessageGroupId"], "os-101")
+        self.assertEqual(kwargs["MessageGroupId"], msg.saga_id)
         self.assertEqual(kwargs["MessageDeduplicationId"], msg.message_id)
         body = json.loads(kwargs["MessageBody"])
         self.assertEqual(set(body.keys()), ENVELOPE_KEYS)
