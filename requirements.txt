@@ -19,6 +19,8 @@ django-filter>=24.0,<25.0
 
 # Observabilidade (Fase 3)
 newrelic>=9.0,<10.0
+# Contrato da Saga (rastreio W3C pelo SQS)
+oficina-saga @ https://github.com/helyomendesdev/tech-challenge-oficina-saga/archive/refs/tags/v1.0.0.zip
 
 # Testes
 pytest-django>=4.8,<5.0
