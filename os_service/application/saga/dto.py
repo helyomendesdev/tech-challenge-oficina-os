@@ -137,6 +137,36 @@ def envelope(msg: MensagemSaga) -> dict:
     }
 
 
+def deserializar(dados: dict) -> MensagemSaga:
+    """Envelope camelCase do contrato → MensagemSaga (inverso de envelope)."""
+    if not isinstance(dados, dict):
+        raise ValueError("envelope deve ser objeto JSON")
+    obrig = ("messageId", "type", "sagaId", "osId", "requestId", "occurredAt")
+    faltantes = [campo for campo in obrig if campo not in dados]
+    if faltantes:
+        raise ValueError(f"campos ausentes no envelope: {', '.join(faltantes)}")
+    try:
+        occurred = datetime.fromisoformat(str(dados["occurredAt"]))
+        os_id = int(dados["osId"])
+        version = int(dados.get("version", 1))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"campo com tipo inválido: {exc}") from exc
+    return MensagemSaga(
+        message_id=str(dados["messageId"]),
+        type=str(dados["type"]),
+        version=version,
+        saga_id=str(dados["sagaId"]),
+        os_id=os_id,
+        causation_id=(
+            None if dados.get("causationId") is None
+            else str(dados["causationId"])
+        ),
+        request_id=str(dados["requestId"]),
+        occurred_at=occurred,
+        payload=dict(dados.get("payload") or {}),
+    )
+
+
 @dataclass(frozen=True)
 class Transicao:
     """Uma linha de `transicoes:` da máquina."""

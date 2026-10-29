@@ -148,3 +148,7 @@ EXECUTION_SERVICE_URL = config('EXECUTION_SERVICE_URL', default='http://localhos
 
 # Fila (SQS na Fase 4 — configuração entra quando a Sophia subir a infra)
 SAGA_QUEUE_URL = config('SAGA_QUEUE_URL', default='')
+# Fila de respostas (Billing/Execução → -os): o worker usa
+# consumir_respostas_saga; polling entre ondas no laço contínuo.
+SAGA_RESPONSE_QUEUE_URL = config('SAGA_RESPONSE_QUEUE_URL', default='')
+SAGA_POLL_INTERVAL_SECONDS = config('SAGA_POLL_INTERVAL_SECONDS', default=10, cast=int)
