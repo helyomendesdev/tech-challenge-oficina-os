@@ -9,9 +9,12 @@
 """
 import json
 import uuid
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 from django.db import transaction as db_transaction
 from django.test import TestCase
+from oficina_saga import rastreio
 
 from os_service.application.saga import dto
 from os_service.infrastructure.saga_adapters import (
@@ -103,9 +106,43 @@ class SQSSagaPublisherV1TestCase(TestCase):
         publisher.publish(msg)
 
         _, kwargs = client.send_message.call_args
-        self.assertEqual(kwargs["MessageGroupId"], "os-101")
+        self.assertEqual(kwargs["MessageGroupId"], msg.saga_id)
         self.assertEqual(kwargs["MessageDeduplicationId"], msg.message_id)
         body = json.loads(kwargs["MessageBody"])
         self.assertEqual(set(body.keys()), ENVELOPE_KEYS)
         self.assertEqual(body["sagaId"], msg.saga_id)
         self.assertEqual(body["payload"], {"clienteId": 7})
+
+
+    def test_publish_leva_traceparent_w3c_nos_message_attributes(self):
+        """Trace atravessa a fila: traceparent vai em MessageAttributes (contrato v1)."""
+        client = MagicMock()
+        client.send_message.return_value = {"MessageId": "m-2"}
+        publisher = SQSSagaPublisherV1(
+            queue_url="https://sqs.sa-east-1.amazonaws.com/123/saga.fifo",
+            client=client,
+        )
+        msg = dto.MensagemSaga(
+            message_id=str(uuid.uuid4()),
+            type="GerarOrcamento",
+            saga_id=str(uuid.uuid4()),
+            os_id=102,
+            request_id="req-2",
+            occurred_at=datetime.now(timezone.utc),
+            causation_id=None,
+            payload={"clienteId": 7},
+        )
+
+        publisher.publish(msg)
+
+        _, kwargs = client.send_message.call_args
+        attrs = kwargs["MessageAttributes"]
+        self.assertEqual(attrs["traceparent"]["DataType"], "String")
+        self.assertIsNotNone(
+            rastreio.parse_traceparent(attrs["traceparent"]["StringValue"])
+        )
+        # O header proprietário do agente não vai para a fila.
+        self.assertNotIn("newrelic", attrs)
+        # Contexto de transporte fica fora do corpo (envelope fechado).
+        body = json.loads(kwargs["MessageBody"])
+        self.assertNotIn("traceparent", body)
