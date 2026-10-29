@@ -22,7 +22,15 @@ from os_service.application.saga import dto
 from os_service.application.saga.contrato_v1 import CONTRATO_SAGA_ESTADOS_V1
 
 # Gatilhos externos da máquina (não são mensagens de serviço)
-GATILHOS = ("inicio", "cancelamento")
+GATILHOS = ("inicio", "cancelamento", "timeout")
+
+# Id que cada comando de compensação exige (schemas de comandos do contrato);
+# guardado na saga quando a resposta do passo chega.
+ID_DA_COMPENSACAO = {
+    "CancelarOrcamento": "orcamentoId",
+    "EstornarPagamento": "pagamentoId",
+    "CancelarExecucao": "execucaoId",
+}
 
 
 class SagaOrquestradorV1:
@@ -51,6 +59,7 @@ class SagaOrquestradorV1:
         estado = self.state_repository.criar(
             saga_id, os_id, self.maquina.inicial
         )
+        self.state_repository.salvar_referencias(saga_id, {"requestId": request_id})
         self._aplicar_pos_transicao(
             estado_atual=self.maquina.inicial,
             mensagem="inicio",
@@ -89,6 +98,13 @@ class SagaOrquestradorV1:
         self.state_repository.salvar_estado(msg.saga_id, alvo)
         if motivo is not None and motivo != "herdado":
             self.state_repository.salvar_motivo(msg.saga_id, motivo)
+        ids = {
+            chave: valor
+            for chave in ID_DA_COMPENSACAO.values()
+            if (valor := (msg.payload or {}).get(chave))
+        }
+        if ids:
+            self.state_repository.salvar_referencias(msg.saga_id, ids)
 
         if comando is not None:
             self._enviar_comando(
@@ -130,6 +146,45 @@ class SagaOrquestradorV1:
         return self.state_repository.get(saga_id)
 
     # ------------------------------------------------------------------
+    # Gatilho externo: timeout de aprovação (ADR-003 do -saga)
+    # ------------------------------------------------------------------
+    def expirar(self, saga_id: str) -> dto.SagaV1StateDTO:
+        """Orçamento sem resposta além do prazo (gatilho externo `timeout`).
+
+        O comando leva o requestId da abertura da saga: não há requisição
+        HTTP por trás do agendamento.
+        """
+        estado = self.state_repository.get(saga_id)
+        if estado is None:
+            raise dto.SagaNaoEncontradaError(f"Saga {saga_id} não encontrada")
+        if estado.estado in self.maquina.finais:
+            return estado
+
+        try:
+            alvo, comando, motivo = self.maquina.transicao(estado.estado, "timeout")
+        except dto.TransicaoInvalidaError:
+            return estado  # já saiu de AGUARDANDO_APROVACAO: descarta
+
+        self.state_repository.salvar_estado(saga_id, alvo)
+        self.state_repository.salvar_motivo(saga_id, motivo)
+        self._enviar_comando(
+            comando=comando,
+            causa=None,
+            motivo=motivo,
+            saga_id=saga_id,
+            os_id=estado.os_id,
+            request_id=estado.referencias.get("requestId"),
+        )
+        return self.state_repository.get(saga_id)
+
+    def expirar_vencidas(self, limite: datetime) -> list[str]:
+        """Expira as sagas em AGUARDANDO_APROVACAO desde antes de `limite`."""
+        saga_ids = self.state_repository.listar_aguardando_aprovacao_antes_de(limite)
+        for saga_id in saga_ids:
+            self.expirar(saga_id)
+        return saga_ids
+
+    # ------------------------------------------------------------------
     # Internos
     # ------------------------------------------------------------------
     def _aplicar_pos_transicao(
@@ -168,33 +223,39 @@ class SagaOrquestradorV1:
     ) -> dto.MensagemSaga:
         """Publica o comando da transição como MensagemSaga do contrato."""
         base = causa or {}
+        saga_id = saga_id or base.saga_id
         msg = dto.MensagemSaga(
             message_id=str(uuid4()),
             type=comando,
-            saga_id=saga_id or base.saga_id,
+            saga_id=saga_id,
             os_id=os_id if os_id is not None else base.os_id,
             request_id=request_id or base.request_id,
             occurred_at=self.clock(),
             causation_id=causa.message_id if causa else None,
-            payload=self._payload_comando(comando, base, motivo, payload),
+            payload=self._payload_comando(comando, base, motivo, payload, saga_id),
         )
         self.publisher.publish(msg)
         return msg
 
     def _payload_comando(
-        self, comando: str, base, motivo: str | None, extra: dict | None
+        self, comando: str, base, motivo: str | None, extra: dict | None, saga_id: str
     ) -> dict:
         """Monta o payload mínimo do comando.
 
         - `GerarOrcamento` leva o payload do gatilho (diagnóstico).
-        - Comandos de compensação levam ids + motivo (contrato exige motivo
-          em CancelarOrcamento/CancelarExecucao/EstornarPagamento).
+        - Comandos de compensação levam exatamente o id do passo desfeito +
+          motivo (schema com additionalProperties: false); o id vem da saga,
+          porque a mensagem causadora nem sempre o traz.
         - Demais comandos levam os ids que vieram na mensagem causadora
           (ex.: OrcamentoGerado.orcamentoId → SolicitarPagamento.orcamentoId).
         """
         payload = dict(extra or {})
         if comando == "GerarOrcamento":
             return payload
+        if comando in ID_DA_COMPENSACAO:
+            chave = ID_DA_COMPENSACAO[comando]
+            referencias = self.state_repository.get(saga_id).referencias
+            return {chave: referencias.get(chave), "motivo": motivo}
         if motivo is not None:
             payload["motivo"] = motivo if motivo != "herdado" else payload.get("motivo")
         for chave in ("orcamentoId", "pagamentoId", "execucaoId"):

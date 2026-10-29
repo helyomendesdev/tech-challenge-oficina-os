@@ -130,6 +130,15 @@ class MaquinaEstadosTestCase(unittest.TestCase):
         self.assertEqual(comando, "CancelarExecucao")
         self.assertEqual(motivo, dto_v1.MotivoReversao.CANCELADO_PELO_CLIENTE)
 
+    def test_gatilho_externo_timeout(self):
+        """ADR-003 do -saga: orçamento sem resposta compensa com motivo TIMEOUT."""
+        alvo, comando, motivo = self.maquina.transicao(
+            dto_v1.EstadoSaga.AGUARDANDO_APROVACAO, "timeout",
+        )
+        self.assertEqual(alvo, dto_v1.EstadoSaga.COMPENSANDO)
+        self.assertEqual(comando, "CancelarOrcamento")
+        self.assertEqual(motivo, "TIMEOUT")
+
     def test_transicoes_cobrem_todos_os_estados_da_maquina(self):
         """Toda transição referencia estados e mensagens conhecidos."""
         gatilhos = set(CONTRATO_SAGA_ESTADOS_V1["gatilhos_externos"])

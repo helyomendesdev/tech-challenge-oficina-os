@@ -211,10 +211,13 @@ class DjangoSagaStateRepositoryV1:
         return self._dto(instancia) if instancia else None
 
     def salvar_estado(self, saga_id: str, novo_estado) -> dto.SagaV1StateDTO:
+        from django.utils import timezone
+
         from os_service.models import SagaInstance
 
         instancia = SagaInstance.objects.get(saga_id=saga_id)
         instancia.estado = novo_estado.value
+        instancia.estado_desde = timezone.now()
         if novo_estado is dto.EstadoSaga.CONCLUIDA:
             instancia.status = dto.StatusSaga.CONCLUIDA.value
         elif novo_estado is dto.EstadoSaga.CANCELADA:
@@ -227,6 +230,24 @@ class DjangoSagaStateRepositoryV1:
 
         SagaInstance.objects.filter(saga_id=saga_id).update(motivo=motivo)
 
+    def salvar_referencias(self, saga_id: str, referencias: dict) -> None:
+        from os_service.models import SagaInstance
+
+        instancia = SagaInstance.objects.get(saga_id=saga_id)
+        instancia.referencias = {**(instancia.referencias or {}), **referencias}
+        instancia.save(update_fields=["referencias"])
+
+    def listar_aguardando_aprovacao_antes_de(self, limite) -> list[str]:
+        from os_service.models import SagaInstance
+
+        return [
+            str(saga_id)
+            for saga_id in SagaInstance.objects.filter(
+                estado=dto.EstadoSaga.AGUARDANDO_APROVACAO.value,
+                estado_desde__lt=limite,
+            ).values_list("saga_id", flat=True)
+        ]
+
     def _dto(self, instancia) -> dto.SagaV1StateDTO:
         return dto.SagaV1StateDTO(
             saga_id=str(instancia.saga_id),
@@ -234,6 +255,7 @@ class DjangoSagaStateRepositoryV1:
             status=dto.StatusSaga(instancia.status),
             estado=dto.EstadoSaga(instancia.estado),
             motivo=instancia.motivo,
+            referencias=dict(instancia.referencias or {}),
         )
 
 

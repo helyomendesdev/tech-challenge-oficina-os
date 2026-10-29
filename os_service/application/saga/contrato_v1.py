@@ -1,4 +1,4 @@
-"""Vendido do -saga (PR #2, contrato/v1) — fonte única das transições.
+"""Vendido do -saga (tag v1.0.0) — fonte única das transições.
 
 Arquivo: contrato/saga-estados.yaml do repo tech-challenge-oficina-saga.
 Atualizar aqui quando o contrato evoluir (v1.1+); o validador do -saga
@@ -23,6 +23,7 @@ CONTRATO_SAGA_ESTADOS_V1 = {
     "gatilhos_externos": {
         "inicio": "Requisição HTTP que conclui o diagnóstico e abre a Saga.",
         "cancelamento": "Cliente pede cancelamento da OS com a execução em andamento.",
+        "timeout": "Agendamento no OS Service acha orçamento sem resposta além do prazo (ADR-003).",
     },
     "transicoes": [
         {"de": "INICIADA", "recebe": "inicio", "para": "ORCAMENTO_SOLICITADO",
@@ -42,6 +43,9 @@ CONTRATO_SAGA_ESTADOS_V1 = {
         {"de": "AGUARDANDO_APROVACAO", "recebe": "OrcamentoRecusado",
          "para": "CANCELADA",
          "nota": "Em aberto (questões-abertas, item 2) — no monólito a recusa volta ao diagnóstico."},
+        {"de": "AGUARDANDO_APROVACAO", "recebe": "timeout", "para": "COMPENSANDO",
+         "envia": "CancelarOrcamento", "motivo": "TIMEOUT",
+         "nota": "Prazo e disparo no ADR-003. Nada foi pago ainda, então só o orçamento é desfeito."},
         {"de": "EXECUCAO_SOLICITADA", "recebe": "ExecucaoIniciada",
          "para": "EM_EXECUCAO"},
         {"de": "EXECUCAO_SOLICITADA", "recebe": "ExecucaoFalhou",
@@ -105,6 +109,12 @@ CONTRATO_SAGA_ESTADOS_V1 = {
             "comeca_em": "AGUARDANDO_APROVACAO",
             "mensagens": ["OrcamentoRecusado"],
             "termina_em": "CANCELADA",
+        },
+        "timeout": {
+            "comeca_em": "AGUARDANDO_APROVACAO", "gatilho": "timeout",
+            "mensagens": [],
+            "termina_em": "COMPENSANDO",
+            "pendente": {"comando": "CancelarOrcamento", "motivo": "TIMEOUT"},
         },
     },
 }
