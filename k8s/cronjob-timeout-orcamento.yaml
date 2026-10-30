@@ -1,0 +1,61 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: os-service-timeout-orcamento
+  namespace: oficina
+  labels:
+    app: os-service
+    fase: "4"
+    adorno: "timeout"
+
+spec:
+  # ADR-003: varredura a cada 5 min (prazo configuravel ORCAMENTO_TIMEOUT_MINUTOS).
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 600
+
+      template:
+        metadata:
+          labels:
+            app: os-service-timeout
+
+        spec:
+          restartPolicy: Never
+
+          automountServiceAccountToken: false
+
+          imagePullSecrets:
+            - name: ecr-registry-secret
+
+          containers:
+            - name: timeout
+              image: <ECR_REPO>:<IMAGE_TAG>
+              imagePullPolicy: IfNotPresent
+
+              command:
+                - python
+                - manage.py
+                - checar_timeouts_orcamento
+
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                  ephemeral-storage: "128Mi"
+
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+                  ephemeral-storage: "512Mi"
+
+              envFrom:
+                - configMapRef:
+                    name: os-service-config
+                - secretRef:
+                    name: os-service-secret

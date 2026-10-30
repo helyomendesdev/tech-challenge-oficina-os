@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: os-service-migrate
+  namespace: oficina
+  labels:
+    app: os-service
+    fase: "4"
+
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+
+  template:
+    metadata:
+      labels:
+        app: os-service-migrate
+
+    spec:
+      restartPolicy: Never
+
+      automountServiceAccountToken: false
+
+      imagePullSecrets:
+        - name: ecr-registry-secret
+
+      containers:
+        - name: migrate
+          image: <ECR_REPO>:<IMAGE_TAG>
+          imagePullPolicy: IfNotPresent
+
+          command:
+            - python
+            - manage.py
+            - migrate
+            - --noinput
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+              ephemeral-storage: "256Mi"
+
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+              ephemeral-storage: "1Gi"
+
+          envFrom:
+            - configMapRef:
+                name: os-service-config
+            - secretRef:
+                name: os-service-secret

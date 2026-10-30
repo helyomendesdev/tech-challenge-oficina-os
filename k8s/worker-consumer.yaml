@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: os-service-consumer-respostas
+  namespace: oficina
+  labels:
+    app: os-service-consumer
+    env: homologacao
+    fase: "4"
+    papel: "worker-saga"
+
+spec:
+  # Worker de consumo da fila de respostas da saga (Billing/Execution -> -os).
+  replicas: 1   # FIFO com MessageGroupId = sagaId: sagas distintas sao
+                # independentes, mas 1 replica simplifica o 1o deploy;
+                # escalar via volume de fila fica para depois se precisar.
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app: os-service-consumer
+
+  template:
+    metadata:
+      labels:
+        app: os-service-consumer
+        fase: "4"
+
+    spec:
+      imagePullSecrets:
+        - name: ecr-registry-secret
+
+      automountServiceAccountToken: false   # worker sem acesso à API do cluster
+
+      containers:
+        - name: consumer
+          image: <ECR_REPO>:<IMAGE_TAG>
+          imagePullPolicy: IfNotPresent
+
+          command:
+            - python
+            - manage.py
+            - consumir_respostas_saga
+            - --intervalo
+            - "10"
+
+          envFrom:
+            - configMapRef:
+                name: os-service-config
+            - secretRef:
+                name: os-service-secret
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+              ephemeral-storage: "128Mi"
+
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+              ephemeral-storage: "512Mi"
+
+          # Sem HTTP probe: worker sem porta. Liveness por script de fila:
+          # se o laco travar, o container deve cair (fail-fast do command).
