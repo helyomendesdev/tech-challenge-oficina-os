@@ -19,8 +19,7 @@ from os_service.application.ports.ordem_servico_repository import (
 from os_service.application.ports.servico_repository import ServicoRepositoryPort
 from os_service.application.ports.transaction_manager import TransactionManagerPort
 from os_service.application.ports.veiculo_repository import VeiculoRepositoryPort
-from os_service.application.saga.dto import SagaEventDTO, SagaEventType, SagaStep
-from os_service.application.saga.orquestrador import SagaOrquestrador
+from os_service.application.saga.orquestrador_v1 import SagaOrquestradorV1
 from os_service.domain.enums import StatusOrdemServico
 
 
@@ -43,7 +42,7 @@ class AbrirOrdemServicoUseCase:
         transaction_manager: TransactionManagerPort,
         notification_port: NotificationPort | None = None,
         observabilidade_port: ObservabilidadePort | None = None,
-        saga_orquestrador: SagaOrquestrador | None = None,
+        saga_orquestrador: SagaOrquestradorV1 | None = None,
     ):
         self.cliente_repository = cliente_repository
         self.veiculo_repository = veiculo_repository

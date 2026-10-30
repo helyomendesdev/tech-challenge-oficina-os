@@ -44,7 +44,7 @@ from os_service.infrastructure.transactions.django_transaction_manager import (
 from os_service.infrastructure.external_services.simulador_orcamento_service import (
     SimuladorOrcamentoService,
 )
-from os_service.infrastructure.saga_adapters import build_saga_orquestrador
+from os_service.infrastructure.saga_adapters import build_saga_orquestrador_v1
 
 
 def build_abrir_ordem_servico_use_case() -> AbrirOrdemServicoUseCase:
@@ -57,7 +57,7 @@ def build_abrir_ordem_servico_use_case() -> AbrirOrdemServicoUseCase:
         transaction_manager=DjangoTransactionManager(),
         notification_port=FakeNotificationAdapter(),
         observabilidade_port=ObservabilidadeAdapter(),
-        saga_orquestrador=build_saga_orquestrador(),
+        saga_orquestrador=build_saga_orquestrador_v1(),
     )
 
 

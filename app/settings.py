@@ -152,3 +152,5 @@ SAGA_QUEUE_URL = config('SAGA_QUEUE_URL', default='')
 # consumir_respostas_saga; polling entre ondas no laço contínuo.
 SAGA_RESPONSE_QUEUE_URL = config('SAGA_RESPONSE_QUEUE_URL', default='')
 SAGA_POLL_INTERVAL_SECONDS = config('SAGA_POLL_INTERVAL_SECONDS', default=10, cast=int)
+# Prazo do timeout de aprovação (ADR-003) — fica no -os, fora do contrato.
+ORCAMENTO_TIMEOUT_MINUTOS = config('ORCAMENTO_TIMEOUT_MINUTOS', default=30, cast=int)
