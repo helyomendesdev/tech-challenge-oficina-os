@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: os-service
+  namespace: oficina
+  labels:
+    app: os-service
+    fase: "4"
+
+spec:
+  selector:
+    app: os-service
+
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: 30081   # 30080 e do auth (F3) — evitar conflito no mesmo node
+      protocol: TCP
+
+  type: NodePort

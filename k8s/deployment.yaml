@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: os-service
+  namespace: oficina
+  labels:
+    app: os-service
+    env: homologacao
+    version: "1.0.0"
+    fase: "4"
+
+spec:
+  replicas: 2
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  selector:
+    matchLabels:
+      app: os-service
+
+  template:
+    metadata:
+      labels:
+        app: os-service
+        env: homologacao
+        version: "1.0.0"
+        fase: "4"
+
+    spec:
+      automountServiceAccountToken: false   # app sem acesso à API do cluster (S6865)
+      imagePullSecrets:
+        - name: ecr-registry-secret
+
+      containers:
+        - name: app
+          image: <ECR_REPO>:<IMAGE_TAG>   # CD substitui os dois placeholders
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - containerPort: 8000
+
+          envFrom:
+            - configMapRef:
+                name: os-service-config
+
+            - secretRef:
+                name: os-service-secret
+
+            # Chave publica do JWT (auth do Lucas, F3). Opcional: sem o
+            # Secret o servico sobe, mas os endpoints autenticados falham.
+            - secretRef:
+                name: oficina-auth
+                optional: true
+
+            # Licenca do New Relic. Opcional: sem o Secret sobe sem APM.
+            - secretRef:
+                name: newrelic-license
+                optional: true
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+              ephemeral-storage: "256Mi"   # logs/runtime (S6897)
+
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+              ephemeral-storage: "1Gi"
+
+          livenessProbe:
+            httpGet:
+              path: /health/live/
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+
+          readinessProbe:
+            httpGet:
+              path: /health/ready/
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+
+          startupProbe:
+            httpGet:
+              path: /health/live/
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            failureThreshold: 30
