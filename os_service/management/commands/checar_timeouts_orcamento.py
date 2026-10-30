@@ -11,11 +11,21 @@ from datetime import datetime, timezone
 
 from django.core.management.base import BaseCommand
 
-from os_service.application.saga.timeout_orcamento import timeout_padrao
 from os_service.infrastructure.saga_adapters import (
     DjangoSagaStateRepositoryV1,
     build_saga_orquestrador_v1,
 )
+
+
+from django.conf import settings
+
+
+def timeout_padrao() -> "timedelta":
+    """Prazo do ADR-003 (configurável no -os; fora do contrato)."""
+    from datetime import timedelta
+
+    minutos = getattr(settings, "ORCAMENTO_TIMEOUT_MINUTOS", 30)
+    return timedelta(minutes=minutos)
 
 
 class Command(BaseCommand):

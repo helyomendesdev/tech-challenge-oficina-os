@@ -17,9 +17,11 @@ logger = logging.getLogger("os_service.saga")
 class ConsumidorRespostasSaga:
     """Transforma mensagem SQS de resposta em transição do orquestrador."""
 
-    def __init__(self, orquestrador, eventos_processados=None):
+    def __init__(self, orquestrador, eventos_processados=None,
+                 os_status_port=None):
         self.orquestrador = orquestrador
         self.eventos_processados = eventos_processados
+        self.os_status_port = os_status_port
 
     def processar(self, corpo, message_attributes=None) -> dict:
         """Processa uma mensagem recebida; não levanta para saga ausente.
@@ -55,14 +57,29 @@ class ConsumidorRespostasSaga:
             return {"resultado": "ignorada", "messageId": msg.message_id,
                     "estado": None, "trace": trace}
 
-        logger.info(
-            "saga_v1_resposta_processada",
-            extra={"message_id": msg.message_id, "type": msg.type,
-                   "saga_id": msg.saga_id, "os_id": msg.os_id,
-                   "estado": estado.estado.value, **trace},
-        )
+        self._ancorar_na_os(saga_id=msg.saga_id, os_id=msg.os_id,
+                            estado=estado.estado)
         return {"resultado": "processado", "messageId": msg.message_id,
                 "estado": estado.estado.value, "trace": trace}
+
+    def _ancorar_na_os(self, saga_id: str, os_id: int, estado) -> None:
+        """Hook pós-transição: a saga muda, o aggregate da OS acompanha.
+
+        Quebra de hook NÃO reverte a transição (só loga) — mesmo princípio
+        da abertura (PR #5): falha de saga não reverte o negócio.
+        """
+        if self.os_status_port is None:
+            return
+        try:
+            self.os_status_port.apos_transicao(
+                saga_id=saga_id, os_id=os_id, estado=estado
+            )
+        except Exception:  # noqa: BLE001 — hook nunca bloqueia a saga
+            logger.exception(
+                "saga_v1_hook_os_falhou",
+                extra={"saga_id": saga_id, "os_id": os_id,
+                       "estado": estado.value},
+            )
 
     @staticmethod
     def _aceitar_contexto(attributes) -> dict:
