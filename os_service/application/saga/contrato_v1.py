@@ -1,8 +1,11 @@
-"""Vendido do -saga (tag v1.0.0) — fonte única das transições.
+"""Vendido do -saga (tag v1.1.0) — fonte única das transições.
 
 Arquivo: contrato/saga-estados.yaml do repo tech-challenge-oficina-saga.
-Atualizar aqui quando o contrato evoluir (v1.1+); o validador do -saga
-confere exemplos × schemas × esta máquina.
+Atualizar aqui quando a MAQUINA evoluir: em v1.1 (ADR-004, tag v1.1.0) ela
+ficou idêntica à v1.0 (9 estados, 16 transições, 8 trilhas) — o ADR só
+acrescentou campos opcionais ao IniciarExecucao (itemPecaOSId) e à
+ExecucaoFinalizada (pecasConsumidas). O validador do -saga confere
+exemplos × schemas × esta máquina.
 """
 
 CONTRATO_SAGA_ESTADOS_V1 = {
