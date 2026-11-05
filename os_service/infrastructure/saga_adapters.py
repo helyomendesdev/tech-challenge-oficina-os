@@ -167,6 +167,9 @@ def build_saga_orquestrador_v1() -> "SagaOrquestradorV1":
     from django.conf import settings as dj_settings
 
     from os_service.application.saga.orquestrador_v1 import SagaOrquestradorV1
+    from os_service.infrastructure.carga_comando_saga import (
+        DjangoCargaComandoSagaPort,
+    )
 
     billing_url = getattr(dj_settings, "SAGA_BILLING_QUEUE_URL", "")
     execution_url = getattr(dj_settings, "SAGA_EXECUTION_QUEUE_URL", "")
@@ -199,5 +202,13 @@ def build_saga_orquestrador_v1() -> "SagaOrquestradorV1":
     return SagaOrquestradorV1(
         state_repository=DjangoSagaStateRepositoryV1(),
         publisher=publisher,
+        # Payloads completos do contrato (valorTotalCentavos/servicos/pecas):
+        # a carga consulta o aggregate no momento da transição. O gate do
+        # itemPecaOSId segue o ADR-004 (só depois da -execution re-vendar).
+        carga_port=DjangoCargaComandoSagaPort(
+            com_item_peca_os_id=bool(
+                getattr(dj_settings, "SAGA_ENVIA_ITEM_PECA_OS_ID", False)
+            )
+        ),
     )
 
