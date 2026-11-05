@@ -159,3 +159,6 @@ SAGA_RESPONSE_QUEUE_URL = config('SAGA_RESPONSE_QUEUE_URL', default='')
 SAGA_POLL_INTERVAL_SECONDS = config('SAGA_POLL_INTERVAL_SECONDS', default=10, cast=int)
 # Prazo do timeout de aprovação (ADR-003) — fica no -os, fora do contrato.
 ORCAMENTO_TIMEOUT_MINUTOS = config('ORCAMENTO_TIMEOUT_MINUTOS', default=30, cast=int)
+# ADR-004: gate do envio de itemPecaOSId no IniciarExecucao. Padrão OFF
+# (v1.0 exato); liga quando a -execution re-vendar o contrato v1.1.
+SAGA_ENVIA_ITEM_PECA_OS_ID = config('SAGA_ENVIA_ITEM_PECA_OS_ID', default=False, cast=bool)

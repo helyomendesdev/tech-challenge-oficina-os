@@ -32,6 +32,12 @@ ID_DA_COMPENSACAO = {
     "CancelarExecucao": "execucaoId",
 }
 
+# Carga extra do aggregate da OS por comando (só o que o schema aceita)
+CHAVES_DE_CARGA = {
+    "SolicitarPagamento": ("valorTotalCentavos",),
+    "IniciarExecucao": ("servicos", "pecas"),
+}
+
 
 class SagaOrquestradorV1:
     """Decide transições da saga v1 a partir da máquina de estados."""
@@ -41,11 +47,13 @@ class SagaOrquestradorV1:
         state_repository,
         publisher,
         clock=None,
+        carga_port=None,
     ):
         self.state_repository = state_repository
         self.publisher = publisher
         self.clock = clock or (lambda: datetime.now(datetime.now().astimezone().tzinfo))
         self.maquina = dto.MaquinaEstados(CONTRATO_SAGA_ESTADOS_V1)
+        self.carga_port = carga_port
 
     # ------------------------------------------------------------------
     # Gatilho externo: início
@@ -105,6 +113,12 @@ class SagaOrquestradorV1:
         }
         if ids:
             self.state_repository.salvar_referencias(msg.saga_id, ids)
+        # orcamentoId fica nas referências: SolicitarPagamento/IniciarExecucao
+        # precisam dele depois (o PagamentoConfirmado não o traz).
+        if orcamento_id := (msg.payload or {}).get("orcamentoId"):
+            self.state_repository.salvar_referencias(
+                msg.saga_id, {"orcamentoId": orcamento_id}
+            )
 
         if comando is not None:
             self._enviar_comando(
@@ -232,22 +246,29 @@ class SagaOrquestradorV1:
             request_id=request_id or base.request_id,
             occurred_at=self.clock(),
             causation_id=causa.message_id if causa else None,
-            payload=self._payload_comando(comando, base, motivo, payload, saga_id),
+            payload=self._payload_comando(
+                comando, base, motivo, payload, saga_id,
+                os_id=os_id if os_id is not None else (base.os_id if hasattr(base, "os_id") else None),
+            ),
         )
         self.publisher.publish(msg)
         return msg
 
     def _payload_comando(
-        self, comando: str, base, motivo: str | None, extra: dict | None, saga_id: str
+        self, comando: str, base, motivo: str | None, extra: dict | None,
+        saga_id: str, os_id: int | None = None,
     ) -> dict:
         """Monta o payload mínimo do comando.
 
         - `GerarOrcamento` leva o payload do gatilho (diagnóstico).
-        - Comandos de compensação levam exatamente o id do passo desfeito +
+        - Comandos de compensação levam exatamente o id do passo desfeito e
           motivo (schema com additionalProperties: false); o id vem da saga,
           porque a mensagem causadora nem sempre o traz.
-        - Demais comandos levam os ids que vieram na mensagem causadora
-          (ex.: OrcamentoGerado.orcamentoId → SolicitarPagamento.orcamentoId).
+        - SolicitarPagamento/IniciarExecucao levam o orcamentoId (das
+          referências, pois a mensagem causadora nem sempre o traz) e a
+          carga do aggregate da OS via CargaComandoSagaPort:
+          valorTotalCentavos / servicos / pecas (payload completo do
+          contrato — achado do grupo, 05/11).
         """
         payload = dict(extra or {})
         if comando == "GerarOrcamento":
@@ -263,4 +284,14 @@ class SagaOrquestradorV1:
                 valor = (base.payload or {}).get(chave) if hasattr(base, "payload") else None
                 if valor:
                     payload[chave] = valor
+        if comando in ("SolicitarPagamento", "IniciarExecucao") and os_id is not None:
+            if "orcamentoId" not in payload:
+                referencias = self.state_repository.get(saga_id).referencias
+                if (valor := referencias.get("orcamentoId")):
+                    payload["orcamentoId"] = valor
+            if self.carga_port is not None:
+                carga = self.carga_port.carga(comando, os_id)
+                for chave in CHAVES_DE_CARGA[comando]:
+                    if carga.get(chave) is not None:
+                        payload[chave] = carga[chave]
         return payload
