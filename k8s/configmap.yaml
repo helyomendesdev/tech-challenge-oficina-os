@@ -19,10 +19,11 @@ data:
   BILLING_SERVICE_URL: "http://billing-service:8000"
   EXECUTION_SERVICE_URL: "http://execution-service:8000"
 
-  # Fila da saga (contrato v1). SQS FIFO: SAGA_QUEUE_URL = comandos
-  # (orquestrador -> serviços); SAGA_RESPONSE_QUEUE_URL = respostas
+  # Filas da saga por destinatário (contrato v1, issue #17): comandos do
+  # Billing e do Execution; SAGA_RESPONSE_QUEUE_URL = respostas
   # (serviços -> orquestrador, consumidas pelo worker-consumer).
-  SAGA_QUEUE_URL: "<URL_FILA_COMANDOS>"          # ex.: https://sqs.sa-east-1.amazonaws.com/<acct>/saga-comandos.fifo
+  SAGA_BILLING_QUEUE_URL: "<URL_FILA_BILLING_COMANDOS>"    # ex.: https://sqs.sa-east-1.amazonaws.com/<acct>/oficina-billing-comandos.fifo
+  SAGA_EXECUTION_QUEUE_URL: "<URL_FILA_EXECUCAO_COMANDOS>" # ex.: https://sqs.sa-east-1.amazonaws.com/<acct>/oficina-execucao-comandos.fifo
   SAGA_RESPONSE_QUEUE_URL: "<URL_FILA_RESPOSTAS>"
   SAGA_POLL_INTERVAL_SECONDS: "10"
 
