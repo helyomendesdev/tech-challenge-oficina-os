@@ -18,10 +18,11 @@ class ConsumidorRespostasSaga:
     """Transforma mensagem SQS de resposta em transição do orquestrador."""
 
     def __init__(self, orquestrador, eventos_processados=None,
-                 os_status_port=None):
+                 os_status_port=None, consumo_pecas_port=None):
         self.orquestrador = orquestrador
         self.eventos_processados = eventos_processados
         self.os_status_port = os_status_port
+        self.consumo_pecas_port = consumo_pecas_port
 
     def processar(self, corpo, message_attributes=None) -> dict:
         """Processa uma mensagem recebida; não levanta para saga ausente.
@@ -57,10 +58,30 @@ class ConsumidorRespostasSaga:
             return {"resultado": "ignorada", "messageId": msg.message_id,
                     "estado": None, "trace": trace}
 
+        if msg.type == "ExecucaoFinalizada":
+            # ADR-004: baixa do consumido / devolução do restante no estoque
+            # do -os. Quebra de hook NÃO reverte a transição (só loga).
+            self._aplicar_consumo_pecas(msg)
         self._ancorar_na_os(saga_id=msg.saga_id, os_id=msg.os_id,
                             estado=estado.estado)
         return {"resultado": "processado", "messageId": msg.message_id,
                 "estado": estado.estado.value, "trace": trace}
+
+    def _aplicar_consumo_pecas(self, msg: dto.MensagemSaga) -> None:
+        if self.consumo_pecas_port is None:
+            return
+        try:
+            self.consumo_pecas_port.aplicar_consumo(
+                saga_id=msg.saga_id,
+                os_id=msg.os_id,
+                pecas_consumidas=msg.payload.get("pecasConsumidas"),
+            )
+        except Exception:  # noqa: BLE001 — hook nunca bloqueia a saga
+            logger.exception(
+                "saga_v1_consumo_pecas_falhou",
+                extra={"saga_id": msg.saga_id, "os_id": msg.os_id,
+                       "message_id": msg.message_id},
+            )
 
     def _ancorar_na_os(self, saga_id: str, os_id: int, estado) -> None:
         """Hook pós-transição: a saga muda, o aggregate da OS acompanha.
