@@ -118,11 +118,20 @@ def build_consumidor_respostas() -> SQSConsumidorRespostas:
         raise RuntimeError("SAGA_RESPONSE_QUEUE_URL não configurada")
     import boto3
 
+    from os_service.infrastructure.hook_consumo_pecas import (
+        DjangoConsumoPecasPort,
+    )
+    from os_service.infrastructure.hook_os_status import DjangoOSStatusPort
+
     return SQSConsumidorRespostas(
         queue_url=queue_url,
         client=boto3.client("sqs"),
         consumidor=ConsumidorRespostasSaga(
             orquestrador=build_saga_orquestrador_v1(),
             eventos_processados=DjangoEventosProcessados(),
+            # Fatia C (PR #13): a saga anciana o status do aggregate da OS.
+            os_status_port=DjangoOSStatusPort(),
+            # ADR-004: ExecucaoFinalizada fecha o ciclo do estoque do -os.
+            consumo_pecas_port=DjangoConsumoPecasPort(),
         ),
     )
