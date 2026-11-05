@@ -147,6 +147,11 @@ BILLING_SERVICE_URL = config('BILLING_SERVICE_URL', default='http://localhost:80
 EXECUTION_SERVICE_URL = config('EXECUTION_SERVICE_URL', default='http://localhost:8003')
 
 # Fila (SQS na Fase 4 — configuração entra quando a Sophia subir a infra)
+# Filas da saga por destinatário (issue #17: contrato v1 define uma fila de
+# comandos por serviço). SAGA_QUEUE_URL é o legado de fila única, aceito
+# como fallback de transição (sem routing).
+SAGA_BILLING_QUEUE_URL = config('SAGA_BILLING_QUEUE_URL', default='')
+SAGA_EXECUTION_QUEUE_URL = config('SAGA_EXECUTION_QUEUE_URL', default='')
 SAGA_QUEUE_URL = config('SAGA_QUEUE_URL', default='')
 # Fila de respostas (Billing/Execução → -os): o worker usa
 # consumir_respostas_saga; polling entre ondas no laço contínuo.

@@ -87,7 +87,8 @@ class SQSSagaPublisherV1TestCase(TestCase):
         client = MagicMock()
         client.send_message.return_value = {"MessageId": "m-1"}
         publisher = SQSSagaPublisherV1(
-            queue_url="https://sqs.sa-east-1.amazonaws.com/123/saga.fifo",
+            billing_queue_url="https://sqs.sa-east-1.amazonaws.com/123/oficina-billing-comandos.fifo",
+            execution_queue_url="https://sqs.sa-east-1.amazonaws.com/123/oficina-execucao-comandos.fifo",
             client=client,
         )
         msg = dto.MensagemSaga(
@@ -106,6 +107,10 @@ class SQSSagaPublisherV1TestCase(TestCase):
         publisher.publish(msg)
 
         _, kwargs = client.send_message.call_args
+        self.assertEqual(
+            kwargs["QueueUrl"],
+            "https://sqs.sa-east-1.amazonaws.com/123/oficina-billing-comandos.fifo",
+        )
         self.assertEqual(kwargs["MessageGroupId"], msg.saga_id)
         self.assertEqual(kwargs["MessageDeduplicationId"], msg.message_id)
         body = json.loads(kwargs["MessageBody"])
@@ -119,7 +124,8 @@ class SQSSagaPublisherV1TestCase(TestCase):
         client = MagicMock()
         client.send_message.return_value = {"MessageId": "m-2"}
         publisher = SQSSagaPublisherV1(
-            queue_url="https://sqs.sa-east-1.amazonaws.com/123/saga.fifo",
+            billing_queue_url="https://sqs.sa-east-1.amazonaws.com/123/oficina-billing-comandos.fifo",
+            execution_queue_url="https://sqs.sa-east-1.amazonaws.com/123/oficina-execucao-comandos.fifo",
             client=client,
         )
         msg = dto.MensagemSaga(
@@ -146,3 +152,107 @@ class SQSSagaPublisherV1TestCase(TestCase):
         # Contexto de transporte fica fora do corpo (envelope fechado).
         body = json.loads(kwargs["MessageBody"])
         self.assertNotIn("traceparent", body)
+
+
+COMANDOS_EXECUCAO = "https://sqs.sa-east-1.amazonaws.com/123/oficina-execucao-comandos.fifo"
+COMANDOS_BILLING = "https://sqs.sa-east-1.amazonaws.com/123/oficina-billing-comandos.fifo"
+
+
+def _msg(tipo: str) -> dto.MensagemSaga:
+    return dto.MensagemSaga(
+        message_id=str(uuid.uuid4()),
+        type=tipo,
+        saga_id=str(uuid.uuid4()),
+        os_id=103,
+        request_id="req-3",
+        occurred_at=datetime.now(timezone.utc),
+        causation_id=None,
+        payload={},
+    )
+
+
+class RotreamentoPorDestinatarioTestCase(TestCase):
+    """Issue #17: fila única fazia todo comando ir para o mesmo destino."""
+
+    TIPOS_BILLING = ("GerarOrcamento", "SolicitarPagamento", "CancelarOrcamento", "EstornarPagamento")
+    TIPOS_EXECUCAO = ("IniciarExecucao", "CancelarExecucao")
+
+    def _publisher(self, client):
+        return SQSSagaPublisherV1(
+            billing_queue_url=COMANDOS_BILLING,
+            execution_queue_url=COMANDOS_EXECUCAO,
+            client=client,
+        )
+
+    def test_comandos_da_execucao_vao_para_a_fila_da_execucao(self):
+        client = MagicMock()
+        client.send_message.return_value = {"MessageId": "m-3"}
+        publisher = self._publisher(client)
+        for tipo in self.TIPOS_EXECUCAO:
+            publisher.publish(_msg(tipo))
+            _, kwargs = client.send_message.call_args
+            self.assertEqual(kwargs["QueueUrl"], COMANDOS_EXECUCAO, tipo)
+
+    def test_comandos_do_billing_vao_para_a_fila_do_billing(self):
+        client = MagicMock()
+        client.send_message.return_value = {"MessageId": "m-4"}
+        publisher = self._publisher(client)
+        for tipo in self.TIPOS_BILLING:
+            publisher.publish(_msg(tipo))
+            _, kwargs = client.send_message.call_args
+            self.assertEqual(kwargs["QueueUrl"], COMANDOS_BILLING, tipo)
+
+    def test_todos_os_comandos_do_contrato_tem_destinatario(self):
+        """Se um tipo novo entrar sem rota, o publish levanta (não silencia)."""
+        client = MagicMock()
+        publisher = self._publisher(client)
+        with self.assertRaises(ValueError):
+            publisher.publish(_msg("MensagemDesconhecida"))
+
+    def test_fila_sem_url_configurada_levanta_runtime(self):
+        client = MagicMock()
+        publisher = SQSSagaPublisherV1(
+            billing_queue_url="",
+            execution_queue_url=COMANDOS_EXECUCAO,
+            client=client,
+        )
+        with self.assertRaises(RuntimeError):
+            publisher.publish(_msg("GerarOrcamento"))
+
+
+class FiacaoDoOrquestradorTestCase(TestCase):
+    """build_saga_orquestrador_v1: SQS com as duas filas; InMemory sem elas."""
+
+    def _com_settings(self, **kwargs):
+        from django.test import override_settings
+
+        return override_settings(**kwargs)
+
+    def test_build_com_as_duas_filas_monta_publisher_sqs(self):
+        with self._com_settings(
+            SAGA_BILLING_QUEUE_URL=COMANDOS_BILLING,
+            SAGA_EXECUTION_QUEUE_URL=COMANDOS_EXECUCAO,
+        ):
+            from unittest.mock import patch
+
+            from os_service.infrastructure.saga_adapters import build_saga_orquestrador_v1
+
+            with patch("os_service.infrastructure.saga_adapters.boto3") as mock_boto:
+                orquestrador = build_saga_orquestrador_v1()
+                publisher = orquestrador.publisher
+                mock_boto.client.assert_called_once_with("sqs")
+
+        self.assertIsInstance(publisher, SQSSagaPublisherV1)
+        self.assertEqual(publisher.fila_de("GerarOrcamento"), COMANDOS_BILLING)
+        self.assertEqual(publisher.fila_de("IniciarExecucao"), COMANDOS_EXECUCAO)
+
+    def test_build_sem_filas_monta_publisher_em_memoria(self):
+        from os_service.infrastructure.saga_adapters import (
+            InMemorySagaPublisherV1,
+            build_saga_orquestrador_v1,
+        )
+        from unittest.mock import patch
+
+        with self._com_settings(SAGA_BILLING_QUEUE_URL="", SAGA_EXECUTION_QUEUE_URL=""):
+            orquestrador = build_saga_orquestrador_v1()
+        self.assertIsInstance(orquestrador.publisher, InMemorySagaPublisherV1)
