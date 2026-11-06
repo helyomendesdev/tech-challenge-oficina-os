@@ -7,6 +7,7 @@
   aceita reenvio pelo messageId);
 - build real: com filas configuradas, o orquestrador escreve na outbox.
 """
+import json
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -166,6 +167,27 @@ class PublicarComandosSagaTestCase(TestCase):
         self.cmd_execution.refresh_from_db()
         self.assertIsNotNone(self.cmd_billing.publicado_em)
         self.assertIsNotNone(self.cmd_execution.publicado_em)
+
+    def test_comando_com_causation_id_sai_como_string_no_envelope(self):
+        # Todo comando depois do GerarOrcamento tem causationId (a resposta
+        # que o causou); o UUIDField volta como UUID e o drain caía no
+        # json.dumps do envelope.
+        causa = uuid.uuid4()
+        self.cmd_billing.causation_id = causa
+        self.cmd_billing.save(update_fields=["causation_id"])
+
+        boto_cli = self._drena()
+
+        corpos = [
+            json.loads(c.kwargs["MessageBody"])
+            for c in boto_cli.return_value.send_message.call_args_list
+        ]
+        pagamento = next(
+            c for c in corpos if c["type"] == "SolicitarPagamento"
+        )
+        self.assertEqual(pagamento["causationId"], str(causa))
+        self.cmd_billing.refresh_from_db()
+        self.assertIsNotNone(self.cmd_billing.publicado_em)
 
     def test_falha_no_envio_nao_marca_e_passada_segunda_publica(self):
         boto_cli = MagicMock()
