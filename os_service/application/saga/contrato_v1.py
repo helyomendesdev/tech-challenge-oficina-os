@@ -23,6 +23,19 @@ CONTRATO_SAGA_ESTADOS_V1 = {
         "CONCLUIDA": "Execução finalizada. Fim feliz.",
         "CANCELADA": "Saga encerrada sem execução concluída.",
     },
+    # Status da OS no monolito que cada estado espelha (bloco status_os do
+    # saga-estados.yaml); a rota de consulta devolve como statusOs.
+    "status_os": {
+        "INICIADA": "AGUARDANDO",
+        "ORCAMENTO_SOLICITADO": "AGUARDANDO",
+        "AGUARDANDO_APROVACAO": "AGUARDANDO",
+        "PAGAMENTO_SOLICITADO": "AGUARDANDO",
+        "EXECUCAO_SOLICITADA": "EXECUCAO",
+        "EM_EXECUCAO": "EXECUCAO",
+        "CONCLUIDA": "FINALIZADA",
+        "COMPENSANDO": "CANCELADA",
+        "CANCELADA": "CANCELADA",
+    },
     "gatilhos_externos": {
         "inicio": "Requisição HTTP que conclui o diagnóstico e abre a Saga.",
         "cancelamento": "Cliente pede cancelamento da OS com a execução em andamento.",

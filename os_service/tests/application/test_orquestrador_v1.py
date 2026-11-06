@@ -165,6 +165,10 @@ class SagaOrquestradorV1TestCase(unittest.TestCase):
         iniciou = self.publisher.publicados[-1]
         self.assertEqual(iniciou.type, "IniciarExecucao")
         self.assertEqual(iniciou.causation_id, self._ultima_msg.message_id)
+        # Schema com additionalProperties: false — o pagamentoId da resposta
+        # causadora nao pode vazar para o comando (o Execution recusa).
+        self.assertLessEqual(set(iniciou.payload), {"orcamentoId", "servicos", "pecas"})
+        self.assertLessEqual(set(solicitou.payload), {"orcamentoId", "valorTotalCentavos"})
 
         r4 = self._responder("ExecucaoIniciada", {"execucaoId": str(uuid4()), "orcamentoId": str(uuid4()), "iniciadaEm": "2026-10-16T13:06:00Z"})
         self.assertEqual(r4.estado, dto.EstadoSaga.EM_EXECUCAO)

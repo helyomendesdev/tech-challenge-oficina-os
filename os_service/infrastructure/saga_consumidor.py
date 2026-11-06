@@ -138,6 +138,7 @@ def build_consumidor_respostas() -> SQSConsumidorRespostas:
         raise RuntimeError("SAGA_RESPONSE_QUEUE_URL não configurada")
     import boto3
 
+    from os_service.infrastructure.saga_adapters import DjangoRegistroMensagensSaga
     from os_service.infrastructure.hook_consumo_pecas import (
         DjangoConsumoPecasPort,
     )
@@ -153,5 +154,7 @@ def build_consumidor_respostas() -> SQSConsumidorRespostas:
             os_status_port=DjangoOSStatusPort(),
             # ADR-004: ExecucaoFinalizada fecha o ciclo do estoque do -os.
             consumo_pecas_port=DjangoConsumoPecasPort(),
+            # Historico da rota de consulta da Saga (RECEBIDA).
+            registro_mensagens=DjangoRegistroMensagensSaga(),
         ),
     )

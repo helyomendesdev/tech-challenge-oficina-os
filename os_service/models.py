@@ -534,6 +534,33 @@ class SagaInstance(models.Model):
     def __str__(self):
         return f"Saga OS {self.os_id} — {self.estado} ({self.status})"
 
+class SagaMensagem(models.Model):
+    """Mensagem enviada ou recebida por uma Saga (historico da consulta).
+
+    ENVIADA: comando publicado pelo orquestrador. RECEBIDA: resposta aceita
+    pelo consumidor depois do dedupe. `message_id` unico: reentrega nao
+    duplica. `trace_id` e o trace-id W3C (32 hex) que viajou com a mensagem.
+    """
+
+    DIRECOES = [("ENVIADA", "ENVIADA"), ("RECEBIDA", "RECEBIDA")]
+
+    saga_id = models.UUIDField(db_index=True)
+    type = models.CharField(max_length=40)
+    message_id = models.UUIDField(unique=True)
+    causation_id = models.UUIDField(null=True, blank=True)
+    occurred_at = models.DateTimeField()
+    direcao = models.CharField(max_length=8, choices=DIRECOES)
+    request_id = models.CharField(max_length=128)
+    trace_id = models.CharField(max_length=32)
+
+    class Meta:
+        db_table = "saga_mensagem"
+        ordering = ["occurred_at", "id"]
+
+    def __str__(self):
+        return f"{self.direcao} {self.type} ({self.saga_id})"
+
+
 class ProcessedEvent(models.Model):
     """Índice de dedupe global por event_id (idempotência do consumidor)."""
 

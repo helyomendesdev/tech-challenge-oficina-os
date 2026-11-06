@@ -48,7 +48,11 @@ class ChecarTimeoutsV1TestCase(TestCase):
         repo = DjangoSagaStateRepositoryV1()
         self.assertEqual(repo.get(vencida).estado, dto.EstadoSaga.COMPENSANDO)
         self.assertEqual(repo.get(vencida).motivo, "TIMEOUT")
-        self.assertEqual(repo.get(vencida).referencias,
+        referencias = dict(repo.get(vencida).referencias)
+        # o traceparent da Saga (um trace por Saga) tambem fica nas referencias
+        traceparent = referencias.pop("traceparent")
+        self.assertRegex(traceparent, r"^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$")
+        self.assertEqual(referencias,
                          {"requestId": "req-t", "orcamentoId": orcamento_id})
         self.assertEqual(repo.get(recente).estado, dto.EstadoSaga.AGUARDANDO_APROVACAO)
         self.assertIn("1 sagas expiradas", saida.getvalue())

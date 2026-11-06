@@ -15,11 +15,30 @@ Diferenças do rascunho (orquestrador.py, legado):
 Este módulo contém só a lógica de decisão (camada de aplicação). Transporte
 e persistência entram por ports — adapters em infrastructure/.
 """
+import logging
 from datetime import datetime
 from uuid import uuid4
 
 from os_service.application.saga import dto
 from os_service.application.saga.contrato_v1 import CONTRATO_SAGA_ESTADOS_V1
+
+logger = logging.getLogger("os_service.saga")
+
+
+def trace_id_de(traceparent) -> str | None:
+    """trace-id (32 hex) de um traceparent W3C; None se invalido ou ausente."""
+    from oficina_saga.rastreio import parse_traceparent
+
+    parsed = parse_traceparent(traceparent)
+    return parsed.trace_id if parsed else None
+
+
+def _traceparent_da_abertura() -> str:
+    """Traceparent da Saga: o da requisicao se o agente estiver ativo, senao novo."""
+    from oficina_saga import newrelic_adapter
+
+    atributos = newrelic_adapter.atributos_para_envio()
+    return atributos["traceparent"]["StringValue"]
 
 # Gatilhos externos da máquina (não são mensagens de serviço)
 GATILHOS = ("inicio", "cancelamento", "timeout")
@@ -38,6 +57,15 @@ CHAVES_DE_CARGA = {
     "IniciarExecucao": ("servicos", "pecas"),
 }
 
+# Campos que o schema do comando aceita (payload com additionalProperties: false
+# em contrato/schemas/comandos/). O laco que herda ids da mensagem causadora
+# trazia o pagamentoId do PagamentoConfirmado para o IniciarExecucao, e o
+# Execution recusa o comando inteiro.
+CAMPOS_DO_PAYLOAD = {
+    "SolicitarPagamento": ("orcamentoId", "valorTotalCentavos"),
+    "IniciarExecucao": ("orcamentoId", "servicos", "pecas"),
+}
+
 
 class SagaOrquestradorV1:
     """Decide transições da saga v1 a partir da máquina de estados."""
@@ -48,9 +76,12 @@ class SagaOrquestradorV1:
         publisher,
         clock=None,
         carga_port=None,
+        registro_mensagens=None,
     ):
         self.state_repository = state_repository
         self.publisher = publisher
+        # Port do historico da consulta (SagaMensagem); None = sem registro.
+        self.registro_mensagens = registro_mensagens
         self.clock = clock or (lambda: datetime.now(datetime.now().astimezone().tzinfo))
         self.maquina = dto.MaquinaEstados(CONTRATO_SAGA_ESTADOS_V1)
         self.carga_port = carga_port
@@ -67,7 +98,11 @@ class SagaOrquestradorV1:
         estado = self.state_repository.criar(
             saga_id, os_id, self.maquina.inicial
         )
-        self.state_repository.salvar_referencias(saga_id, {"requestId": request_id})
+        # Um trace por Saga: todo comando enviado herda este traceparent.
+        self.state_repository.salvar_referencias(
+            saga_id,
+            {"requestId": request_id, "traceparent": _traceparent_da_abertura()},
+        )
         self._aplicar_pos_transicao(
             estado_atual=self.maquina.inicial,
             mensagem="inicio",
@@ -250,9 +285,35 @@ class SagaOrquestradorV1:
                 comando, base, motivo, payload, saga_id,
                 os_id=os_id if os_id is not None else (base.os_id if hasattr(base, "os_id") else None),
             ),
+            traceparent=self._traceparent_da_saga(saga_id),
         )
-        self.publisher.publish(msg)
+        resposta = self.publisher.publish(msg)
+        self._registrar_enviada(msg, resposta)
         return msg
+
+    def _traceparent_da_saga(self, saga_id: str) -> str | None:
+        estado = self.state_repository.get(saga_id)
+        if estado is None:
+            return None
+        return (estado.referencias or {}).get("traceparent")
+
+    def _registrar_enviada(self, msg: dto.MensagemSaga, resposta) -> None:
+        """Grava o comando no historico; falha do registro nunca desfaz o envio.
+
+        O trace gravado e o que o publisher devolveu como realmente enviado
+        (chave `traceparent` da resposta), nao o que se pretendia enviar.
+        """
+        if self.registro_mensagens is None:
+            return
+        enviado = resposta.get("traceparent") if isinstance(resposta, dict) else None
+        trace_id = trace_id_de(enviado) or trace_id_de(msg.traceparent)
+        try:
+            self.registro_mensagens.registrar(msg, "ENVIADA", trace_id)
+        except Exception:  # noqa: BLE001 — historico nunca bloqueia a saga
+            logger.exception(
+                "saga_v1_registro_enviada_falhou",
+                extra={"message_id": msg.message_id, "saga_id": msg.saga_id},
+            )
 
     def _payload_comando(
         self, comando: str, base, motivo: str | None, extra: dict | None,
@@ -294,4 +355,9 @@ class SagaOrquestradorV1:
                 for chave in CHAVES_DE_CARGA[comando]:
                     if carga.get(chave) is not None:
                         payload[chave] = carga[chave]
+        if comando in CAMPOS_DO_PAYLOAD:
+            payload = {
+                chave: valor for chave, valor in payload.items()
+                if chave in CAMPOS_DO_PAYLOAD[comando]
+            }
         return payload

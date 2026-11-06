@@ -18,8 +18,10 @@ class ConsumidorRespostasSaga:
     """Transforma mensagem SQS de resposta em transição do orquestrador."""
 
     def __init__(self, orquestrador, eventos_processados=None,
-                 os_status_port=None, consumo_pecas_port=None):
+                 os_status_port=None, consumo_pecas_port=None,
+                 registro_mensagens=None):
         self.orquestrador = orquestrador
+        self.registro_mensagens = registro_mensagens
         self.eventos_processados = eventos_processados
         self.os_status_port = os_status_port
         self.consumo_pecas_port = consumo_pecas_port
@@ -58,6 +60,7 @@ class ConsumidorRespostasSaga:
             return {"resultado": "ignorada", "messageId": msg.message_id,
                     "estado": None, "trace": trace}
 
+        self._registrar_recebida(msg, trace)
         if msg.type == "ExecucaoFinalizada":
             # ADR-004: baixa do consumido / devolução do restante no estoque
             # do -os. Quebra de hook NÃO reverte a transição (só loga).
@@ -66,6 +69,23 @@ class ConsumidorRespostasSaga:
                             estado=estado.estado)
         return {"resultado": "processado", "messageId": msg.message_id,
                 "estado": estado.estado.value, "trace": trace}
+
+    def _registrar_recebida(self, msg: dto.MensagemSaga, trace: dict) -> None:
+        """Historico da consulta: so depois do dedupe e com a saga existente.
+
+        Quebra do registro NAO reverte a transicao (so loga).
+        """
+        if self.registro_mensagens is None:
+            return
+        try:
+            self.registro_mensagens.registrar(
+                msg, "RECEBIDA", trace.get("trace_id")
+            )
+        except Exception:  # noqa: BLE001 — historico nunca bloqueia a saga
+            logger.exception(
+                "saga_v1_registro_recebida_falhou",
+                extra={"message_id": msg.message_id, "saga_id": msg.saga_id},
+            )
 
     def _aplicar_consumo_pecas(self, msg: dto.MensagemSaga) -> None:
         if self.consumo_pecas_port is None:
