@@ -99,7 +99,11 @@ class SQSConsumidorRespostas:
         receipt = mensagem.get("ReceiptHandle", "")
         attributes = mensagem.get("MessageAttributes") or {}
         try:
-            with transacao_de_mensagem("consumir_respostas_saga"):
+            # Outbox (ADR-001): estado + comando gerado no mesmo commit da
+            # transição processada; a mensagem só se apaga depois do commit.
+            from django.db import transaction
+
+            with transacao_de_mensagem("consumir_respostas_saga"), transaction.atomic():
                 resultado = self.consumidor.processar(
                     mensagem.get("Body", ""), attributes
                 )
