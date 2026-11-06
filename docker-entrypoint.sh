@@ -13,7 +13,10 @@ if [ "$#" -eq 0 ]; then
     set -- gunicorn app.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 60
 fi
 
-if [ "$1" = "gunicorn" ] && [ -n "$NEW_RELIC_LICENSE_KEY" ]; then
+# API (gunicorn) e consumidor das respostas da Saga (python manage.py
+# consumir_respostas_saga) sobem sob o agente: sem ele o consumo nao entra
+# no trace distribuido.
+if { [ "$1" = "gunicorn" ] || [ "$1" = "python" ]; } && [ -n "$NEW_RELIC_LICENSE_KEY" ]; then
     echo "INFO: subindo sob o agente New Relic"
     exec newrelic-admin run-program "$@"
 fi
