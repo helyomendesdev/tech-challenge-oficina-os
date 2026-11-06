@@ -1,0 +1,252 @@
+openapi: 3.0.3
+info:
+  title: OS Service - consulta da Saga
+  version: "1.0.0"
+  description: >-
+    Rota de leitura que o OS Service expoe para observar a Saga de uma Ordem de
+    Servico. O BDD contra a stack real acompanha o fluxo por ela. Os enums de
+    estado, statusOs e type espelham contrato/saga-estados.yaml e
+    contrato/schemas/envelope.schema.json.
+servers:
+  - url: http://localhost:8001
+    description: OS Service local (python manage.py runserver 8001, como no README do -os)
+  - url: http://localhost:8000
+    description: OS Service do stack/docker-compose.yml, pela porta publicada no host (padrao do motor stack-real)
+  - url: http://os:8000
+    description: OS Service dentro do stack/docker-compose.yml
+
+paths:
+  /api/v1/ordens-servico/{id}/saga:
+    get:
+      operationId: consultarSagaDaOrdemServico
+      summary: Consulta as Sagas de uma Ordem de Servico
+      description: >-
+        Devolve todas as Sagas da OS e qual esta ativa. Uma OS pode ter mais de
+        uma Saga: a recusa de orcamento devolve a OS ao diagnostico e abre outra.
+        Autorizacao: so o cliente dono da OS (sub do JWT igual ao clienteId) ou
+        um usuario com papel de atendente le a Saga, porque o historico expoe
+        orcamentoId, requestId e traceId.
+      tags: [saga]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Id da Ordem de Servico (mesmo valor do osId das mensagens).
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Sagas da OS.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsultaSaga"
+        "401":
+          description: Token JWT ausente, invalido ou expirado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Erro"
+        "403":
+          description: O JWT e valido, mas o chamador nao e o cliente dono da OS nem tem o papel de atendente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Erro"
+        "404":
+          description: Ordem de Servico inexistente ou sem Saga aberta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Erro"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Erro:
+      type: object
+      required: [codigo, mensagem]
+      properties:
+        codigo:
+          type: string
+          description: Codigo de erro em MAIUSCULAS.
+          pattern: "^[A-Z][A-Z0-9_]*$"
+          example: SAGA_NAO_ENCONTRADA
+        mensagem:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Texto legivel do erro.
+          example: Ordem de Servico sem Saga.
+    ConsultaSaga:
+      type: object
+      required: [osId, sagaAtual, sagas]
+      properties:
+        osId:
+          type: integer
+          minimum: 1
+          description: Id da Ordem de Servico.
+        sagaAtual:
+          type: string
+          format: uuid
+          description: sagaId da Saga ativa (a mais recente); esta presente em sagas.
+        sagas:
+          type: array
+          description: Todas as Sagas da OS, da mais antiga para a mais recente.
+          items:
+            $ref: "#/components/schemas/Saga"
+      example:
+        osId: 42
+        sagaAtual: 5c1f0a7e-3b2d-4e8a-9c4f-1a2b3c4d5e6f
+        sagas:
+          - sagaId: 0b7e9d52-6a31-4f0c-8d2e-7f1a9c3b5d40
+            estado: CANCELADA
+            orcamentoId: 93f0be09-1d79-5c92-a371-0cd69b36a8de
+            statusOs: CANCELADA
+            iniciadaEm: "2026-10-01T12:00:00Z"
+            atualizadaEm: "2026-10-01T12:05:00Z"
+            historico:
+              - type: GerarOrcamento
+                messageId: 11111111-1111-4111-8111-111111111111
+                causationId: null
+                occurredAt: "2026-10-01T12:00:00Z"
+                direcao: ENVIADA
+                requestId: req-bdd-a1b2c3
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+              - type: OrcamentoGerado
+                messageId: 22222222-2222-4222-8222-222222222222
+                causationId: 11111111-1111-4111-8111-111111111111
+                occurredAt: "2026-10-01T12:01:00Z"
+                direcao: RECEBIDA
+                requestId: req-bdd-a1b2c3
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+              - type: OrcamentoRecusado
+                messageId: 33333333-3333-4333-8333-333333333333
+                causationId: 22222222-2222-4222-8222-222222222222
+                occurredAt: "2026-10-01T12:05:00Z"
+                direcao: RECEBIDA
+                requestId: req-bdd-a1b2c3
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+          - sagaId: 5c1f0a7e-3b2d-4e8a-9c4f-1a2b3c4d5e6f
+            estado: ORCAMENTO_SOLICITADO
+            statusOs: AGUARDANDO
+            iniciadaEm: "2026-10-02T09:00:00Z"
+            atualizadaEm: "2026-10-02T09:00:00Z"
+            historico:
+              - type: GerarOrcamento
+                messageId: 44444444-4444-4444-8444-444444444444
+                causationId: null
+                occurredAt: "2026-10-02T09:00:00Z"
+                direcao: ENVIADA
+                requestId: req-bdd-a1b2c3
+                traceId: 4bf92f3577b34da6a3ce929d0e0e4736
+    Saga:
+      type: object
+      required: [sagaId, estado, statusOs, iniciadaEm, atualizadaEm, historico]
+      properties:
+        sagaId:
+          type: string
+          format: uuid
+          description: Instancia da Saga no orquestrador.
+        estado:
+          type: string
+          description: Estado da maquina de estados da Saga.
+          enum:
+            - INICIADA
+            - ORCAMENTO_SOLICITADO
+            - AGUARDANDO_APROVACAO
+            - PAGAMENTO_SOLICITADO
+            - EXECUCAO_SOLICITADA
+            - EM_EXECUCAO
+            - COMPENSANDO
+            - CONCLUIDA
+            - CANCELADA
+        orcamentoId:
+          type: string
+          format: uuid
+          description: >-
+            Orcamento da Saga (orcamentoId do OrcamentoGerado). Opcional: ausente
+            ate o Billing gerar o orcamento. E o id da rota de aprovacao em
+            contrato/billing-aprovacao.openapi.yaml.
+        statusOs:
+          type: string
+          description: Status da OS no monolito que o estado espelha.
+          enum: [AGUARDANDO, EXECUCAO, FINALIZADA, CANCELADA]
+        iniciadaEm:
+          type: string
+          format: date-time
+          description: Instante em que a Saga foi aberta (UTC).
+        atualizadaEm:
+          type: string
+          format: date-time
+          description: Instante da ultima mensagem registrada na Saga (UTC).
+        historico:
+          type: array
+          description: Mensagens enviadas e recebidas pela Saga, em ordem cronologica.
+          items:
+            $ref: "#/components/schemas/MensagemDaSaga"
+    MensagemDaSaga:
+      type: object
+      required:
+        - type
+        - messageId
+        - causationId
+        - occurredAt
+        - direcao
+        - requestId
+        - traceId
+      properties:
+        type:
+          type: string
+          description: Nome da mensagem, como no envelope.
+          enum:
+            - GerarOrcamento
+            - CancelarOrcamento
+            - SolicitarPagamento
+            - EstornarPagamento
+            - IniciarExecucao
+            - CancelarExecucao
+            - OrcamentoGerado
+            - OrcamentoFalhou
+            - OrcamentoAprovado
+            - OrcamentoRecusado
+            - OrcamentoCancelado
+            - PagamentoConfirmado
+            - PagamentoFalhou
+            - PagamentoEstornado
+            - ExecucaoIniciada
+            - ExecucaoFalhou
+            - ExecucaoFinalizada
+            - ExecucaoCancelada
+        messageId:
+          type: string
+          format: uuid
+          description: Identificador unico da mensagem.
+        causationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: messageId da mensagem que causou esta; nulo quando o gatilho foi externo.
+        occurredAt:
+          type: string
+          format: date-time
+          description: Instante em que o emissor produziu a mensagem (UTC).
+        direcao:
+          type: string
+          description: ENVIADA pelo orquestrador ou RECEBIDA de outro servico.
+          enum: [ENVIADA, RECEBIDA]
+        requestId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: X-Request-Id da requisicao HTTP de origem, igual ao requestId do envelope.
+        traceId:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+          description: trace-id W3C (32 hex minusculo) da Saga, o mesmo do traceparent das mensagens.

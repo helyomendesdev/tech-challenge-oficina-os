@@ -7,6 +7,7 @@ enquanto os ViewSets legados continuam atendendo endpoints da Fase 1.
 
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import (
@@ -17,9 +18,11 @@ from drf_spectacular.utils import (
     extend_schema,
 )
 
+from os_service.authentication import ClienteJWTAuthentication
 from os_service.domain.exceptions import (
     DomainError,
 )
+from os_service.infrastructure.saga_consulta import consultar_sagas_da_os
 from os_service.domain.api_exceptions import response_from_domain_error
 from os_service.application.dtos import ConsultarStatusOrdemServicoOutputDTO
 from os_service.application.use_cases.consultar_status_os import _descricao_status
@@ -423,3 +426,86 @@ class AtualizarStatusPorNotificacaoAPIView(APIView):
             return handle_domain_error(exc)
         output_serializer = AtualizarStatusNotificacaoOutputSerializer(output_dto)
         return Response(output_serializer.data)
+
+
+class ConsultarSagaOrdemServicoAPIView(APIView):
+    """Consulta das Sagas de uma OS (contrato os-consulta-saga.openapi.yaml)."""
+
+    # Cliente JWT (RS256, emissor oficina-auth) ou JWT do atendente (simplejwt):
+    # o primeiro devolve None para token que nao e de cliente.
+    authentication_classes = [ClienteJWTAuthentication, JWTAuthentication]
+    permission_classes = [ClienteJWTStatusPermission]
+
+    CODIGOS_DE_ERRO = {
+        status.HTTP_401_UNAUTHORIZED: "NAO_AUTENTICADO",
+        status.HTTP_403_FORBIDDEN: "ACESSO_NEGADO",
+    }
+
+    @staticmethod
+    def _erro(codigo, mensagem, status_code):
+        return Response(
+            {"codigo": codigo, "mensagem": mensagem[:500] or codigo},
+            status=status_code,
+        )
+
+    def handle_exception(self, exc):
+        response = super().handle_exception(exc)
+        codigo = self.CODIGOS_DE_ERRO.get(response.status_code)
+        if codigo is not None:
+            # Erro do contrato: {codigo, mensagem}
+            mensagem = str(getattr(exc, "detail", "") or codigo)
+            response.data = {"codigo": codigo, "mensagem": mensagem[:500]}
+        return response
+
+    @extend_schema(
+        tags=["Saga"],
+        summary="Consulta as Sagas de uma OS",
+        description=(
+            "Devolve todas as Sagas da OS e qual esta ativa. So o cliente dono "
+            "da OS ou um atendente (staff) le a Saga."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="ordem_servico_id",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.PATH,
+                description="Identificador da ordem de servico.",
+            ),
+        ],
+        responses={
+            200: OpenApiTypes.OBJECT,
+            401: OpenApiResponse(description="Token ausente, invalido ou expirado."),
+            403: OpenApiResponse(description="Nem dono da OS nem atendente."),
+            404: OpenApiResponse(description="OS inexistente ou sem Saga."),
+        },
+    )
+    def get(self, request, ordem_servico_id: int):
+        if is_client_principal(request.user):
+            ordem_servico = OrdemServico.objects.filter(pk=ordem_servico_id).first()
+            if ordem_servico is None:
+                return self._erro(
+                    "SAGA_NAO_ENCONTRADA",
+                    "Ordem de Servico inexistente ou sem Saga.",
+                    status.HTTP_404_NOT_FOUND,
+                )
+            if ordem_servico.cliente_id != request.user.cliente_id:
+                return self._erro(
+                    "ACESSO_NEGADO",
+                    "A Ordem de Servico pertence a outro cliente.",
+                    status.HTTP_403_FORBIDDEN,
+                )
+        elif not request.user.is_staff:
+            return self._erro(
+                "ACESSO_NEGADO",
+                "Somente o cliente dono da OS ou um atendente le a Saga.",
+                status.HTTP_403_FORBIDDEN,
+            )
+
+        consulta = consultar_sagas_da_os(ordem_servico_id)
+        if consulta is None:
+            return self._erro(
+                "SAGA_NAO_ENCONTRADA",
+                "Ordem de Servico inexistente ou sem Saga.",
+                status.HTTP_404_NOT_FOUND,
+            )
+        return Response(consulta)

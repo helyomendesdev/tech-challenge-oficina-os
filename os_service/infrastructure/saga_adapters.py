@@ -130,10 +130,14 @@ class SQSSagaPublisherV1:
         # traceparent/tracestate vão em MessageAttributes (tracing/propagacao-sqs.md
         # do -saga); com o agente ativo, o trace da requisição continua na fila.
         newrelic_adapter.registrar_mensagem(envelope)
+        # Um trace por Saga: o traceparent enviado e filho do da Saga.
+        atributos = newrelic_adapter.atributos_para_envio(
+            traceparent_atual=msg.traceparent
+        )
         response = self.client.send_message(
             QueueUrl=queue_url,
             MessageBody=json.dumps(envelope, ensure_ascii=False),
-            MessageAttributes=newrelic_adapter.atributos_para_envio(),
+            MessageAttributes=atributos,
             # Contrato v1 (asyncapi.yaml, ADR-001): ordem por Saga, não por OS.
             MessageGroupId=msg.saga_id,
             MessageDeduplicationId=msg.message_id,
@@ -148,7 +152,11 @@ class SQSSagaPublisherV1:
                 "queue_url": queue_url,
             },
         )
-        return response
+        # `traceparent`: o que foi de fato para a fila (o orquestrador grava
+        # o trace-id dele no historico).
+        enviado = atributos.get("traceparent", {}).get("StringValue")
+        base = response if isinstance(response, dict) else {}
+        return {**base, "traceparent": enviado}
 
 
 class InMemorySagaPublisherV1:
@@ -158,8 +166,44 @@ class InMemorySagaPublisherV1:
         self.publicados: list[dto.MensagemSaga] = []
 
     def publish(self, msg: dto.MensagemSaga) -> dict:
+        from oficina_saga import newrelic_adapter
+
         self.publicados.append(msg)
-        return {"MessageId": msg.message_id}
+        atributos = newrelic_adapter.atributos_para_envio(
+            traceparent_atual=msg.traceparent
+        )
+        return {
+            "MessageId": msg.message_id,
+            "traceparent": atributos["traceparent"]["StringValue"],
+        }
+
+
+class DjangoRegistroMensagensSaga:
+    """Historico da consulta: grava SagaMensagem (idempotente por messageId)."""
+
+    def registrar(self, msg: dto.MensagemSaga, direcao: str, trace_id=None) -> None:
+        from uuid import uuid4
+
+        from os_service.application.saga.orquestrador_v1 import trace_id_de
+        from os_service.models import SagaInstance, SagaMensagem
+
+        if not trace_id:
+            # Sem trace na mensagem: o da Saga; sem ele, um novo (32 hex).
+            instancia = SagaInstance.objects.filter(saga_id=msg.saga_id).first()
+            salvo = (instancia.referencias or {}).get("traceparent") if instancia else None
+            trace_id = trace_id_de(salvo) or uuid4().hex
+        SagaMensagem.objects.get_or_create(
+            message_id=msg.message_id,
+            defaults={
+                "saga_id": msg.saga_id,
+                "type": msg.type,
+                "causation_id": msg.causation_id,
+                "occurred_at": msg.occurred_at,
+                "direcao": direcao,
+                "request_id": msg.request_id,
+                "trace_id": trace_id,
+            },
+        )
 
 
 def build_saga_orquestrador_v1() -> "SagaOrquestradorV1":
@@ -202,6 +246,7 @@ def build_saga_orquestrador_v1() -> "SagaOrquestradorV1":
     return SagaOrquestradorV1(
         state_repository=DjangoSagaStateRepositoryV1(),
         publisher=publisher,
+        registro_mensagens=DjangoRegistroMensagensSaga(),
         # Payloads completos do contrato (valorTotalCentavos/servicos/pecas):
         # a carga consulta o aggregate no momento da transição. O gate do
         # itemPecaOSId segue o ADR-004 (só depois da -execution re-vendar).

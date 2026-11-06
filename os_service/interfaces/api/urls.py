@@ -5,6 +5,7 @@ from django.urls import path
 from os_service.interfaces.api.views import (
     AbrirOrdemServicoAPIView,
     AtualizarStatusPorNotificacaoAPIView,
+    ConsultarSagaOrdemServicoAPIView,
     ConsultarStatusOrdemServicoAPIView,
     ListarFilaOrdensServicoAPIView,
     ProcessarRespostaOrcamentoAPIView,
@@ -32,6 +33,11 @@ urlpatterns = [
         "ordens-servico/<int:ordem_servico_id>/status/",
         ConsultarStatusOrdemServicoAPIView.as_view(),
         name="consultar-status-ordem-servico",
+    ),
+    path(
+        "ordens-servico/<int:ordem_servico_id>/saga/",
+        ConsultarSagaOrdemServicoAPIView.as_view(),
+        name="consultar-saga-ordem-servico",
     ),
     path(
         "orcamentos/notificacoes/",
