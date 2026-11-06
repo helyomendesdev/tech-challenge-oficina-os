@@ -4,6 +4,9 @@
 - SQSSagaPublisherV1: publica comandos nas filas por destinatário (boto3),
   envelope do contrato v1, MessageGroupId=sagaId, dedupe por messageId e
   trace W3C (issue #17: uma fila de comandos por serviço, como no AsyncAPI).
+- OutboxSagaPublisherV1: grava o comando na tabela saga_comando junto da
+  transição (ADR-001 §3.5); o commando `publicar_comandos_saga` drena para
+  as filas via SQSSagaPublisherV1.
 - InMemorySagaPublisherV1: publisher de teste/local.
 
 SQS entra de fato quando as filas estão configuradas
@@ -13,8 +16,6 @@ endpoints locais usam o publisher fake dos testes.
 """
 import json
 import logging
-
-import boto3
 
 from os_service.application.saga import dto
 
@@ -178,6 +179,48 @@ class InMemorySagaPublisherV1:
         }
 
 
+class OutboxSagaPublisherV1:
+    """Outbox da Saga (ADR-001 §3.5): grava o comando com a transição.
+
+    O publish gravado na tabela saga_comando entra na mesma transaction do
+    use case em que a transição corre (abrir/processar_resposta já são
+    atomic); o enfileiramento SQS fica com o command
+    `publicar_comandos_saga` (drain), que usa o SQSSagaPublisherV1 com as
+    filas por destinatário. Idempotente: message_id único na tabela e como
+    MessageDeduplicationId na fila.
+    """
+
+    def publish(self, msg: dto.MensagemSaga) -> dict:
+        from django.db import transaction
+
+        from os_service.models import SagaComando
+
+        with transaction.atomic():
+            SagaComando.objects.get_or_create(
+                message_id=msg.message_id,
+                defaults={
+                    "saga_id": msg.saga_id,
+                    "os_id": msg.os_id,
+                    "type": msg.type,
+                    "payload": msg.payload or {},
+                    "request_id": msg.request_id or "",
+                    "causation_id": msg.causation_id,
+                    "occurred_at": msg.occurred_at,
+                    "traceparent": msg.traceparent or "",
+                },
+            )
+        logger.info(
+            "saga_v1_comando_na_outbox",
+            extra={
+                "message_id": msg.message_id,
+                "type": msg.type,
+                "saga_id": msg.saga_id,
+                "os_id": msg.os_id,
+            },
+        )
+        return {"MessageId": msg.message_id}
+
+
 class DjangoRegistroMensagensSaga:
     """Historico da consulta: grava SagaMensagem (idempotente por messageId)."""
 
@@ -235,11 +278,10 @@ def build_saga_orquestrador_v1() -> "SagaOrquestradorV1":
             )
 
     if billing_url and execution_url:
-        publisher = SQSSagaPublisherV1(
-            billing_queue_url=billing_url,
-            execution_queue_url=execution_url,
-            client=boto3.client("sqs"),
-        )
+        # Fio real na outbox (ADR-001 §3.5): o comando é gravado na tabela
+        # saga_comando junto da transição; o commando `publicar_comandos_saga`
+        # drena para as filas por destinatário (SQSSagaPublisherV1).
+        publisher = OutboxSagaPublisherV1()
     else:
         publisher = InMemorySagaPublisherV1()
 

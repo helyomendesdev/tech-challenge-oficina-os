@@ -228,23 +228,22 @@ class FiacaoDoOrquestradorTestCase(TestCase):
 
         return override_settings(**kwargs)
 
-    def test_build_com_as_duas_filas_monta_publisher_sqs(self):
+    def test_build_com_as_duas_filas_monta_publisher_outbox(self):
+        """ADR-001 §3.5: com filas, o fio grava na outbox (o drain publica)."""
         with self._com_settings(
             SAGA_BILLING_QUEUE_URL=COMANDOS_BILLING,
             SAGA_EXECUTION_QUEUE_URL=COMANDOS_EXECUCAO,
         ):
-            from unittest.mock import patch
+            from os_service.infrastructure.saga_adapters import (
+                build_saga_orquestrador_v1,
+            )
 
-            from os_service.infrastructure.saga_adapters import build_saga_orquestrador_v1
+            orquestrador = build_saga_orquestrador_v1()
+            publisher = orquestrador.publisher
 
-            with patch("os_service.infrastructure.saga_adapters.boto3") as mock_boto:
-                orquestrador = build_saga_orquestrador_v1()
-                publisher = orquestrador.publisher
-                mock_boto.client.assert_called_once_with("sqs")
+        from os_service.infrastructure.saga_adapters import OutboxSagaPublisherV1
 
-        self.assertIsInstance(publisher, SQSSagaPublisherV1)
-        self.assertEqual(publisher.fila_de("GerarOrcamento"), COMANDOS_BILLING)
-        self.assertEqual(publisher.fila_de("IniciarExecucao"), COMANDOS_EXECUCAO)
+        self.assertIsInstance(publisher, OutboxSagaPublisherV1)
 
     def test_build_sem_filas_monta_publisher_em_memoria(self):
         from os_service.infrastructure.saga_adapters import (

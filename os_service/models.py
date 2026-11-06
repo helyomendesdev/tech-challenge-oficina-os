@@ -561,6 +561,52 @@ class SagaMensagem(models.Model):
         return f"{self.direcao} {self.type} ({self.saga_id})"
 
 
+class SagaComando(models.Model):
+    """Outbox da Saga (ADR-001 §3.5, PR do outbox 06/11).
+
+    O orquestrador grava o comando de saida na MESMA TRANSACTION que muda
+    o estado da saga (o publisher de fio real grava a linha em vez de
+    publicar direto na fila); o commando `publicar_comandos_saga` drena
+    a outbox para as filas por destinatario e marca `publicado_em`.
+    Idempotente: `message_id` unico e o MessageDeduplicationId da fila.
+    """
+
+    message_id = models.UUIDField(unique=True)
+    saga_id = models.UUIDField(db_index=True)
+    os_id = models.IntegerField()
+    type = models.CharField(max_length=40)
+    payload = models.JSONField(default=dict)
+    request_id = models.CharField(max_length=128)
+    causation_id = models.UUIDField(null=True, blank=True)
+    occurred_at = models.DateTimeField()
+    traceparent = models.CharField(max_length=80, blank=True, default="")
+    criado_em = models.DateTimeField(auto_now_add=True)
+    publicado_em = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        db_table = "saga_comando"
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.type} saga={self.saga_id} publicado={bool(self.publicado_em)}"
+
+    def para_mensagem(self):
+        """Reconstroi o dto.MensagemSaga do comando na outbox."""
+        from os_service.application.saga import dto
+
+        return dto.MensagemSaga(
+            message_id=str(self.message_id),
+            type=self.type,
+            saga_id=str(self.saga_id),
+            os_id=self.os_id,
+            request_id=self.request_id,
+            occurred_at=self.occurred_at,
+            causation_id=self.causation_id,
+            payload=self.payload or {},
+            traceparent=self.traceparent or None,
+        )
+
+
 class ProcessedEvent(models.Model):
     """Índice de dedupe global por event_id (idempotência do consumidor)."""
 
