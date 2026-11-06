@@ -150,3 +150,54 @@ class SQSConsumidorRespostasTestCase(TestCase):
                 "MessageAttributes": ATRIBUTOS_TRACE,
             }]
         }
+
+    def test_processa_dentro_de_transacao_e_aceita_o_traceparent(self):
+        """O consumo roda dentro de BackgroundTask do agente e aceita o trace W3C."""
+        import sys
+        import types
+
+        eventos = []
+        falso = types.ModuleType("newrelic.agent")
+
+        class BackgroundTask:
+            def __init__(self, app, name, group):
+                eventos.append(("abre", name, group))
+
+            def __enter__(self):
+                eventos.append(("dentro",))
+                return self
+
+            def __exit__(self, *exc):
+                eventos.append(("fecha",))
+                return False
+
+        falso.BackgroundTask = BackgroundTask
+        falso.application = lambda: "app"
+        falso.accept_distributed_trace_headers = (
+            lambda headers, transport_type: eventos.append(
+                ("aceita", headers.get("traceparent"), transport_type)
+            )
+        )
+        falso.add_custom_attributes = lambda itens: None
+        falso.insert_distributed_trace_headers = lambda cabecalhos: None
+        pacote = types.ModuleType("newrelic")
+        pacote.agent = falso
+        antigos = {k: sys.modules.get(k) for k in ("newrelic", "newrelic.agent")}
+        sys.modules["newrelic"] = pacote
+        sys.modules["newrelic.agent"] = falso
+        try:
+            self._fila_com("m-nr", _corpo("OrcamentoGerado", self.saga_id, 7,
+                                          str(uuid.uuid4()), {"orcamentoId": 9}))
+            resumo = self.sqs.recebe_onda()
+        finally:
+            for nome, modulo in antigos.items():
+                if modulo is None:
+                    sys.modules.pop(nome, None)
+                else:
+                    sys.modules[nome] = modulo
+        self.assertEqual(resumo["processados"], 1)
+        self.assertEqual(eventos[0], ("abre", "consumir_respostas_saga", "Message/SQS"))
+        self.assertIn(("aceita", TRACEPARENT_FIXO, "Queue"), eventos)
+        # o accept acontece DENTRO da transacao (sem ela o agente ignora)
+        self.assertLess(eventos.index(("dentro",)), eventos.index(("aceita", TRACEPARENT_FIXO, "Queue")))
+        self.assertLess(eventos.index(("aceita", TRACEPARENT_FIXO, "Queue")), eventos.index(("fecha",)))

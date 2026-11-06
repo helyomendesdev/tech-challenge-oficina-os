@@ -8,6 +8,7 @@
 - build_consumidor_respostas: fio com o orquestrador v1; completa com a
   fila real de respostas (SAGA_RESPONSE_QUEUE_URL).
 """
+import contextlib
 import logging
 
 from django.db import IntegrityError
@@ -19,6 +20,24 @@ logger = logging.getLogger("os_service.saga")
 
 # Contrato de tracing: os unicos atributos que viajam na fila levam W3C.
 ATRIBUTOS_DE_TRACE = ["traceparent", "tracestate"]
+
+
+@contextlib.contextmanager
+def transacao_de_mensagem(nome: str):
+    """Transacao de background do New Relic em volta de uma mensagem.
+
+    Fora de requisicao HTTP nao ha transacao, e sem ela o
+    accept_distributed_trace_headers do kit nao faz nada (tracing/
+    newrelic-agente.md do -saga): o consumo das respostas nao aparecia no
+    trace distribuido. Sem o pacote, ou com o agente desligado, nao muda nada.
+    """
+    try:
+        import newrelic.agent as agente
+    except ImportError:
+        yield
+        return
+    with agente.BackgroundTask(agente.application(), name=nome, group="Message/SQS"):
+        yield
 
 
 class DjangoEventosProcessados:
@@ -80,9 +99,10 @@ class SQSConsumidorRespostas:
         receipt = mensagem.get("ReceiptHandle", "")
         attributes = mensagem.get("MessageAttributes") or {}
         try:
-            resultado = self.consumidor.processar(
-                mensagem.get("Body", ""), attributes
-            )
+            with transacao_de_mensagem("consumir_respostas_saga"):
+                resultado = self.consumidor.processar(
+                    mensagem.get("Body", ""), attributes
+                )
         except ValueError:
             logger.warning(
                 "saga_v1_mensagem_invalida",
