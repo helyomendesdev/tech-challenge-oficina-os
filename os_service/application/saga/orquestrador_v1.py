@@ -57,6 +57,15 @@ CHAVES_DE_CARGA = {
     "IniciarExecucao": ("servicos", "pecas"),
 }
 
+# Campos que o schema do comando aceita (payload com additionalProperties: false
+# em contrato/schemas/comandos/). O laco que herda ids da mensagem causadora
+# trazia o pagamentoId do PagamentoConfirmado para o IniciarExecucao, e o
+# Execution recusa o comando inteiro.
+CAMPOS_DO_PAYLOAD = {
+    "SolicitarPagamento": ("orcamentoId", "valorTotalCentavos"),
+    "IniciarExecucao": ("orcamentoId", "servicos", "pecas"),
+}
+
 
 class SagaOrquestradorV1:
     """Decide transições da saga v1 a partir da máquina de estados."""
@@ -346,4 +355,9 @@ class SagaOrquestradorV1:
                 for chave in CHAVES_DE_CARGA[comando]:
                     if carga.get(chave) is not None:
                         payload[chave] = carga[chave]
+        if comando in CAMPOS_DO_PAYLOAD:
+            payload = {
+                chave: valor for chave, valor in payload.items()
+                if chave in CAMPOS_DO_PAYLOAD[comando]
+            }
         return payload
