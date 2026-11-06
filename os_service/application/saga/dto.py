@@ -114,6 +114,9 @@ class MensagemSaga:
     payload: dict = field(default_factory=dict)
     version: int = 1
     causation_id: str | None = None
+    # traceparent W3C da Saga (nao faz parte do envelope: viaja nos
+    # MessageAttributes). Os publishers o usam como pai do traceparent enviado.
+    traceparent: str | None = field(default=None, compare=False)
 
     @property
     def tipo(self) -> TipoMensagem:
