@@ -71,7 +71,7 @@ jobs:
     # Quality Gate. Sem SONAR_TOKEN (ex.: PR vindo de fork) o passo e pulado.
     - name: SonarCloud scan
       if: ${{ env.SONAR_TOKEN != '' }}
-      uses: SonarSource/sonarqube-scan-action@v5
+      uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5
       env:
         SONAR_HOST_URL: https://sonarcloud.io
       with:
