@@ -10,6 +10,8 @@ env:
   DJANGO_SECRET_KEY: "test-key-not-for-production"
   DJANGO_SETTINGS_MODULE: "app.settings_test"
   POSTGRES_PASSWORD: "test_pass"
+  # No env do workflow (e nao do passo) para o `if:` do scan enxergar.
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
 jobs:
   build-and-test:
@@ -64,6 +66,17 @@ jobs:
       with:
         name: test-report
         path: report.xml
+
+    # Qualidade no CI: o scanner envia o coverage.xml ao SonarCloud e espera o
+    # Quality Gate. Sem SONAR_TOKEN (ex.: PR vindo de fork) o passo e pulado.
+    - name: SonarCloud scan
+      if: ${{ env.SONAR_TOKEN != '' }}
+      uses: SonarSource/sonarqube-scan-action@v5
+      env:
+        SONAR_HOST_URL: https://sonarcloud.io
+      with:
+        args: >
+          -Dsonar.qualitygate.wait=true
 
     - name: Build Docker image
       run: docker build -t os-service:${{ github.sha }} .

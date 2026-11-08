@@ -1,0 +1,4 @@
+[run]
+# Caminhos relativos no coverage.xml: o scanner do SonarCloud roda em outro
+# diretorio do runner e nao acharia os arquivos pelo caminho absoluto.
+relative_files = True
