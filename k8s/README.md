@@ -16,6 +16,7 @@ serviço os-service.
 | `migration-job.yaml` | Job `os-service-migrate` | `manage.py migrate` antes do deploy |
 | `cronjob-timeout-orcamento.yaml` | CronJob `*/5 * * * *` | gatilho do timeout de aprovação (ADR-003): `checar_timeouts_orcamento` |
 | `worker-consumer.yaml` | Deployment `os-service-consumer-respostas` | worker `consumir_respostas_saga` em laço contínuo |
+| `worker-publicador.yaml` | Deployment `os-service-publicador-comandos` | drain da outbox da saga: `publicar_comandos_saga --loop` (sem ele nenhum comando sai do -os) |
 | `configmap.yaml` | ConfigMap `os-service-config` | env de config (com placeholders) |
 | `secret.example.yaml` | Secret `os-service-secret` | exemplo — Secret real via `kubectl create secret`, nunca versionado |
 
@@ -28,7 +29,7 @@ kubectl create secret generic os-service-secret -n oficina --from-literal=DJANGO
 # namespace, ecr-registry-secret, newrelic-license e oficina-auth: já cuidadas pelo tech-challenge-oficina-k8s
 kubectl apply -f k8s/migration-job.yaml
 kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml -f k8s/hpa.yaml
-kubectl apply -f k8s/cronjob-timeout-orcamento.yaml -f k8s/worker-consumer.yaml
+kubectl apply -f k8s/cronjob-timeout-orcamento.yaml -f k8s/worker-consumer.yaml -f k8s/worker-publicador.yaml
 ```
 
 ## Pendências para o deploy real
