@@ -601,7 +601,11 @@ class SagaComando(models.Model):
             os_id=self.os_id,
             request_id=self.request_id,
             occurred_at=self.occurred_at,
-            causation_id=self.causation_id,
+            # UUIDField devolve UUID; o envelope vai para json.dumps e o
+            # contrato quer string, como messageId e sagaId.
+            causation_id=(
+                None if self.causation_id is None else str(self.causation_id)
+            ),
             payload=self.payload or {},
             traceparent=self.traceparent or None,
         )
