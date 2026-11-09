@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write   # OIDC
   contents: read
 
 jobs:
@@ -39,6 +38,11 @@ jobs:
   build-and-push:
     needs: [preflight]
     if: needs.preflight.outputs.has_aws == 'true'
+    # OIDC no nivel do job (githubactions:S8233): restrito a quem assume role
+    # AWS; preflight e o resto do workflow ficam read-only.
+    permissions:
+      id-token: write   # OIDC
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -83,6 +87,9 @@ jobs:
   deploy-aws:
     needs: [build-and-push, preflight]
     if: needs.preflight.outputs.has_aws == 'true'
+    permissions:
+      id-token: write   # OIDC
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
